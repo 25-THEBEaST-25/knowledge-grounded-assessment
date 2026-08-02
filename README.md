@@ -1,3 +1,8 @@
+![Python](https://img.shields.io/badge/Python-3.11-blue)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
+![Next.js](https://img.shields.io/badge/Next.js-Frontend-black)
+![License](https://img.shields.io/badge/License-MIT-green)
+
 # A Concept-Aware Framework for Knowledge-Grounded Academic Response Assessment and Learning Analytics
 
 > An AI-powered multimodal academic assessment platform that evaluates handwritten answers, diagrams, mathematical derivations, and programming responses using Retrieval-Augmented Generation (RAG), Multi-Agent AI, Explainable AI (XAI), and Outcome-Based Education (OBE) analytics.
@@ -178,6 +183,15 @@ Department of Computer Engineering
 K.C. College of Engineering & Management Studies & Research
 
 ---
+
+## Academic Project
+
+This repository contains the implementation of our Bachelor of Engineering Major Project at K.C. College of Engineering and Management Studies & Research.
+
+---
+
+The project is under active development.
+
 
 ## License
 
