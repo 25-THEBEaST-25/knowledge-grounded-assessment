@@ -6,12 +6,19 @@ from google import genai
 
 load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
 
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY is not configured.")
+_client = None
 
-client = genai.Client(api_key=api_key)
+
+def get_client():
+    global _client
+    if _client is None:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured.")
+        _client = genai.Client(api_key=api_key)
+    return _client
 
 
 def evaluate_answer(
@@ -67,8 +74,8 @@ The scores must respect the supplied rubric.
 Do not exceed the maximum marks for any criterion.
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
+    response = get_client().models.generate_content(
+        model=GEMINI_MODEL,
         contents=prompt,
     )
 
