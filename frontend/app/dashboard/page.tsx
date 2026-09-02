@@ -20,7 +20,7 @@ export default function DashboardPage() {
               Faculty Dashboard
             </h1>
             <p className="text-slate-600">
-              Welcome back! Here's your teaching analytics and assessment overview.
+              Welcome back! Here&apos;s your teaching analytics and assessment overview.
             </p>
           </div>
 

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 
 from backend.app.schemas.evaluation import (
@@ -6,6 +8,8 @@ from backend.app.schemas.evaluation import (
 )
 from backend.app.services.evaluation_service import evaluate_answer
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/evaluation",
@@ -23,8 +27,9 @@ def evaluate(request: EvaluationRequest):
             rubric=request.rubric,
         )
 
-    except Exception as exc:
+    except Exception:
+        logger.exception("Evaluation failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Evaluation failed: {exc}",
+            detail="Evaluation failed. Please try again later.",
         )

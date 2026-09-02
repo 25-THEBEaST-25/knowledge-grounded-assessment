@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
@@ -21,6 +22,8 @@ from backend.app.services.ocr_service import (
 from backend.app.services.pipeline_service import evaluate_handwritten_image
 from backend.app.services.segmentation_service import segment_answers
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/handwritten",
@@ -101,5 +104,6 @@ async def evaluate(
         raise HTTPException(status_code=400, detail=str(exc))
     except OCRUnavailableError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Evaluation failed: {exc}")
+    except Exception:
+        logger.exception("Handwritten evaluation failed")
+        raise HTTPException(status_code=500, detail="Evaluation failed. Please try again later.")

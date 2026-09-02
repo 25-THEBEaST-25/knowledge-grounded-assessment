@@ -8,6 +8,7 @@ machines that do not have PaddlePaddle installed; such machines get a clear
 from __future__ import annotations
 
 import io
+import logging
 import os
 import threading
 from dataclasses import dataclass, field
@@ -15,6 +16,9 @@ from typing import List, Optional, Protocol, Sequence
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
+
+
+logger = logging.getLogger(__name__)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -160,7 +164,10 @@ class PaddleOCRBackend:
             try:
                 self._engine = PaddleOCR(**kwargs)
             except Exception as exc:  # model download / paddle init failures
-                raise OCRUnavailableError(f"Failed to initialise PaddleOCR: {exc}") from exc
+                logger.exception("Failed to initialise PaddleOCR")
+                raise OCRUnavailableError(
+                    "OCR engine is unavailable. Check server logs."
+                ) from exc
             return self._engine
 
     def extract(self, image_bytes: bytes) -> OCRResult:
