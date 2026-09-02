@@ -28,12 +28,19 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+MAX_IMAGE_DIMENSION = 8000
+MAX_IMAGE_PIXELS = 25_000_000
+
+# Set Pillow decompression bomb threshold
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
+
+
 class OCRUnavailableError(RuntimeError):
     """Raised when the OCR engine cannot be loaded (e.g. paddle not installed)."""
 
 
 class InvalidImageError(ValueError):
-    """Raised when the uploaded bytes are not a decodable image."""
+    """Raised when the uploaded bytes are not a decodable image or exceed safe dimensions."""
 
 
 @dataclass
@@ -60,12 +67,28 @@ class OCRBackend(Protocol):
 
 
 def decode_image(image_bytes: bytes) -> np.ndarray:
-    """Decode uploaded bytes into an RGB ``numpy`` array (H, W, 3)."""
+    """Decode uploaded bytes into an RGB ``numpy`` array (H, W, 3) safely."""
+    if not image_bytes:
+        raise InvalidImageError("Uploaded image data is empty.")
     try:
         with Image.open(io.BytesIO(image_bytes)) as img:
+            width, height = img.size
+            if width <= 0 or height <= 0:
+                raise InvalidImageError("Image has invalid zero dimensions.")
+            if width > MAX_IMAGE_DIMENSION or height > MAX_IMAGE_DIMENSION:
+                raise InvalidImageError(
+                    f"Image dimension ({width}x{height}) exceeds maximum limit ({MAX_IMAGE_DIMENSION}px)."
+                )
+            if width * height > MAX_IMAGE_PIXELS:
+                raise InvalidImageError(
+                    f"Image total pixels ({width * height}) exceed maximum limit ({MAX_IMAGE_PIXELS})."
+                )
             return np.asarray(img.convert("RGB"))
-    except (UnidentifiedImageError, OSError, ValueError) as exc:
+    except InvalidImageError:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise InvalidImageError("Uploaded file is not a valid image.") from exc
+
 
 
 def _bbox_from_poly(poly: Sequence[Sequence[float]]) -> List[int]:

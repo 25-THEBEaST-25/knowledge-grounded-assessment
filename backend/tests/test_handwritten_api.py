@@ -58,6 +58,8 @@ def fakes(monkeypatch):
         FakeOCR("Q1. Photosynthesis makes glucose\nQ2. Mitochondria produce ATP", conf=0.9)
     )
     monkeypatch.setattr(pipeline_service.evaluation_service, "evaluate_answer", fake_evaluator)
+    import backend.app.api.evaluation
+    monkeypatch.setattr(backend.app.api.evaluation, "evaluate_answer", fake_evaluator)
     yield
     ocr_service.set_ocr_backend(original)
 
@@ -71,12 +73,35 @@ QUESTIONS = [
 ]
 
 
+def test_health_endpoint():
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "healthy"}
+
+
 def test_existing_evaluation_route_preserved():
     paths = client.get("/openapi.json").json()["paths"]
     assert "/evaluation/evaluate" in paths
     body = paths["/evaluation/evaluate"]["post"]["requestBody"]["content"]["application/json"]["schema"]
     assert body["$ref"].endswith("EvaluationRequest")
     assert {"/handwritten/ocr", "/handwritten/segment", "/handwritten/evaluate"} <= set(paths)
+
+
+def test_evaluation_evaluate_endpoint():
+    payload = {
+        "question": "What is photosynthesis?",
+        "student_answer": "Process by which plants convert sunlight to chemical energy",
+        "model_answer": "Process converting solar energy into sugars",
+        "rubric": {"max_score": 10},
+    }
+    r = client.post("/evaluation/evaluate", json=payload)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["score"] == 7
+    assert data["max_score"] == 10
+    assert "strengths" in data
+    assert "feedback" in data
+
 
 
 def test_ocr_endpoint():

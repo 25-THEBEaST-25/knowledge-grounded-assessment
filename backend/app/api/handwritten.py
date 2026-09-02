@@ -4,6 +4,7 @@ from typing import List
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import TypeAdapter, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.schemas.handwritten import (
     HandwrittenEvaluationResponse,
@@ -21,7 +22,6 @@ from backend.app.services.ocr_service import (
 )
 from backend.app.services.pipeline_service import evaluate_handwritten_image
 from backend.app.services.segmentation_service import segment_answers
-
 
 logger = logging.getLogger(__name__)
 
@@ -46,20 +46,20 @@ async def _read_image(image: UploadFile) -> bytes:
     return data
 
 
-def _run_ocr(data: bytes):
-    try:
-        return extract_text(data)
-    except InvalidImageError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    except OCRUnavailableError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-
-
 @router.post("/ocr", response_model=OCRResponse)
 async def ocr(image: UploadFile = File(...)):
     """Step 1: run PaddleOCR on a handwritten answer image."""
     data = await _read_image(image)
-    result = _run_ocr(data)
+    try:
+        result = await run_in_threadpool(extract_text, data)
+    except InvalidImageError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except OCRUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception:
+        logger.exception("OCR extraction failed")
+        raise HTTPException(status_code=500, detail="OCR processing failed. Please try again later.")
+
     return OCRResponse(
         extracted_text=result.text,
         lines=[OCRLineOut(text=l.text, confidence=l.confidence, bbox=l.bbox) for l in result.lines],
@@ -69,9 +69,18 @@ async def ocr(image: UploadFile = File(...)):
 
 
 @router.post("/segment", response_model=SegmentResponse)
-def segment(request: SegmentRequest):
+async def segment(request: SegmentRequest):
     """Step 2: split extracted text into per-question answers."""
-    result = segment_answers(request.text, expected_question_ids=request.expected_question_ids)
+    try:
+        result = await run_in_threadpool(
+            segment_answers,
+            request.text,
+            expected_question_ids=request.expected_question_ids,
+        )
+    except Exception:
+        logger.exception("Segmentation failed")
+        raise HTTPException(status_code=500, detail="Answer segmentation failed. Please try again later.")
+
     return SegmentResponse(
         segments=[SegmentOut(**s.__dict__) for s in result.segments],
         unassigned_preamble=result.unassigned_preamble,
@@ -99,7 +108,7 @@ async def evaluate(
 
     data = await _read_image(image)
     try:
-        return evaluate_handwritten_image(data, specs)
+        return await run_in_threadpool(evaluate_handwritten_image, data, specs)
     except InvalidImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except OCRUnavailableError as exc:
@@ -107,3 +116,4 @@ async def evaluate(
     except Exception:
         logger.exception("Handwritten evaluation failed")
         raise HTTPException(status_code=500, detail="Evaluation failed. Please try again later.")
+

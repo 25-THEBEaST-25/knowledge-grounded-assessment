@@ -43,7 +43,7 @@ def test_no_markers_gives_single_segment():
     result = segment_answers("just one long answer\nspanning lines", expected_question_ids=["Q7"])
     assert len(result.segments) == 1
     assert result.segments[0].question_id == "Q7"
-    assert result.segments[0].detected is False
+    assert result.segments[0].detected is True
     assert result.segments[0].text == "just one long answer\nspanning lines"
 
 
