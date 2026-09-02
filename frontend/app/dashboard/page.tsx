@@ -3,6 +3,7 @@
 import Sidebar from '../components/Sidebar';
 import UploadSection from '../components/UploadSection';
 import AnalyticsCards from '../components/AnalyticsCards';
+import HandwrittenEvaluation from '../components/HandwrittenEvaluation';
 
 export default function DashboardPage() {
   return (
@@ -31,6 +32,11 @@ export default function DashboardPage() {
           {/* Upload Section */}
           <div className="mb-8">
             <UploadSection />
+          </div>
+
+          {/* Handwritten answer evaluation (OCR -> segmentation -> AI) */}
+          <div className="mb-8">
+            <HandwrittenEvaluation />
           </div>
 
           {/* Footer */}
