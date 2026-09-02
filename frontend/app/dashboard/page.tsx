@@ -41,10 +41,12 @@ export default function DashboardPage() {
 
           {/* Footer */}
           <div className="text-center text-slate-600 text-sm py-8">
-            <p>Last updated: {new Date().toLocaleString()}</p>
+            <p>Faculty Assessment Portal · Academic Session 2025–2026</p>
           </div>
         </div>
       </main>
     </div>
   );
 }
+
+
