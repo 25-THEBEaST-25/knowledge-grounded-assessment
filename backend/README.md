@@ -90,3 +90,11 @@ pytest            # from repo root; PaddleOCR and Gemini are faked, no key neede
   models when oneDNN is enabled.
 - If `paddleocr` is not installed the API still boots; `/handwritten/*` OCR
   endpoints return HTTP 503 with an explanatory message.
+- A missing/invalid `GEMINI_API_KEY`, a Gemini rate limit (429), a provider
+  error, or a network/timeout failure (`GEMINI_TIMEOUT_MS`, default 30s) all
+  return HTTP 503 with a safe message from both `/evaluation/evaluate` and
+  `/handwritten/evaluate` -- never a stack trace or the provider's raw error.
+- OCR preprocessing (`OCR_UPSCALE`, `OCR_TARGET_LONG_SIDE`, `OCR_AUTOCONTRAST`,
+  `OCR_DENOISE`) is applied only to the copy of the image handed to the OCR
+  engine; see `ocr_service.preprocess_for_ocr` for what each does and why
+  `OCR_DENOISE` defaults off.

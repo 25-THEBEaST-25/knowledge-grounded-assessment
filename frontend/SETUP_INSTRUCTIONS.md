@@ -1,4 +1,4 @@
-# 🎓 Faculty Dashboard - Setup Instructions
+# 🎓 SNAPTIX Frontend - Setup Instructions
 
 ## Quick Start (Automated)
 
@@ -39,8 +39,18 @@ npm run dev
 
 ### Step 4: Open in Browser
 1. Open your web browser
-2. Go to: **http://localhost:3000/dashboard**
-3. You should see the Faculty Dashboard! 🎉
+2. Go to: **http://localhost:3000**
+3. Pick Faculty or Student — you'll land on the Faculty Dashboard or Student Dashboard 🎉
+
+The old `/dashboard` URL still works (it redirects to `/faculty`).
+
+### Step 5: Start the backend too, for the real evaluation features
+
+The Faculty portal's Answer Evaluation tool and assessment workflow call a real backend
+(`/handwritten/evaluate`). Without it running, everything else in the UI still works —
+those two features will show a clear error instead. See `backend/README.md` to start it
+(`uvicorn backend.app.main:app --port 8000` from the repo root, with `GEMINI_API_KEY`
+set).
 
 ---
 
@@ -66,7 +76,7 @@ Run on a different port:
 ```bash
 npm run dev -- -p 3001
 ```
-Then visit: http://localhost:3001/dashboard
+Then visit: http://localhost:3001
 
 ### ❌ "Module not found" errors
 ```bash
@@ -84,29 +94,23 @@ chmod +x setup-and-run.sh
 
 ---
 
-## Dashboard Features
+## What's in each portal
 
-### 📱 Sidebar
-- Responsive navigation menu
-- Collapsible sidebar (click arrow)
-- Quick access to:
-  - Dashboard
-  - Assessments
-  - Analytics
-  - Students
-  - Settings
+### Faculty (`/faculty`)
+Dashboard, Assessments (create + a real upload-and-evaluate workflow), the standalone
+Answer Evaluation tool, Students, Analytics (score distribution, weakest questions, CO/PO
+attainment), Reports, Settings. Most numbers carry a "Demo data" badge — see `/roadmap`
+for exactly what's real vs. sample data.
 
-### 📊 Analytics Cards
-- **Total Assessments**: Count of active assessments
-- **Student Submissions**: Number of submissions this semester
-- **Average Score**: Class performance percentage
-- **Pending Reviews**: Assessments awaiting feedback
+### Student (`/student`)
+Dashboard, My Assessments, My Results (with full per-question breakdowns and AI
+feedback), AI Feedback feed, Learning Gaps, Profile. There is no login yet — the Student
+portal always represents one fixed demo student (Aarav Sharma).
 
-### 📤 Upload Section
-- **Drag & Drop**: Drag files to upload
-- **File Selector**: Click "Select Files" button
-- **Upload Progress**: Real-time progress visualization
-- **Supported Formats**: PDF, DOC, DOCX, XLSX, CSV, TXT
+### The one real feature end-to-end
+Faculty → Assessments → open an assessment → Upload & evaluate answer sheet. This calls
+the real backend (PaddleOCR → segmentation → Gemini), and the result shows up in the
+Student portal tagged "Real evaluation" instead of "Demo data".
 
 ---
 
@@ -121,9 +125,10 @@ chmod +x setup-and-run.sh
 
 ## Environment Setup
 
-Create a `.env.local` file in the `frontend` directory if needed:
+Create a `.env.local` file in the `frontend` directory if the backend isn't running on
+the default address:
 ```env
-NEXT_PUBLIC_OPENWEATHER_API_KEY=your_api_key_here
+NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
 ---
