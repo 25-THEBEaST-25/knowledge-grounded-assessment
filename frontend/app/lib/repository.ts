@@ -95,6 +95,10 @@ export function getSubmission(assessmentId: string, studentId: string): Submissi
   return allSubmissions().find((s) => s.assessmentId === assessmentId && s.studentId === studentId);
 }
 
+export function getSubmissionById(id: string): Submission | undefined {
+  return allSubmissions().find((s) => s.id === id);
+}
+
 function pct(score: number, max: number): number {
   return max > 0 ? (score / max) * 100 : 0;
 }
