@@ -46,7 +46,11 @@ export default function StudentResultDetailPage({ params }: { params: Promise<{ 
 
   const strong = submission.results.filter((r) => r.maxScore > 0 && r.score / r.maxScore >= 0.75);
   const weak = submission.results.filter((r) => r.maxScore > 0 && r.score / r.maxScore < 0.5);
-  const worst = [...submission.results].sort((a, b) => a.score / a.maxScore - b.score / b.maxScore)[0];
+  const sortedByScore = [...submission.results].sort((a, b) => a.score / a.maxScore - b.score / b.maxScore);
+  const lowest = sortedByScore[0];
+  // Only treat the lowest-scoring question as an "improvement target" if it
+  // actually fell short of full marks -- a tie at 100% is not a weak area.
+  const improvementTarget = lowest && lowest.maxScore > 0 && lowest.score / lowest.maxScore < 1 ? lowest : undefined;
 
   return (
     <AppShell
@@ -154,9 +158,10 @@ export default function StudentResultDetailPage({ params }: { params: Promise<{ 
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-indigo-600">Recommended improvement</p>
             <p className="mt-1 text-sm text-slate-700">
-              {worst
-                ? worst.missingConcepts[0] ?? `Review ${worst.questionId} — it scored lowest on this assessment.`
-                : "—"}
+              {improvementTarget
+                ? (improvementTarget.missingConcepts[0] ??
+                  `Review ${improvementTarget.questionId} — it scored lowest on this assessment.`)
+                : "Full marks on every question — no specific improvement needed here."}
             </p>
           </div>
         </CardBody>
