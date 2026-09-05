@@ -15,6 +15,7 @@ from backend.app.schemas.handwritten import (
     SegmentRequest,
     SegmentResponse,
 )
+from backend.app.services.evaluation_service import GeminiUnavailableError
 from backend.app.services.ocr_service import (
     InvalidImageError,
     OCRUnavailableError,
@@ -112,6 +113,9 @@ async def evaluate(
     except InvalidImageError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except OCRUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except GeminiUnavailableError as exc:
+        logger.warning("Handwritten evaluation unavailable: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception:
         logger.exception("Handwritten evaluation failed")

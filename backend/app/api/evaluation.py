@@ -6,7 +6,10 @@ from backend.app.schemas.evaluation import (
     EvaluationRequest,
     EvaluationResponse,
 )
-from backend.app.services.evaluation_service import evaluate_answer
+from backend.app.services.evaluation_service import (
+    GeminiUnavailableError,
+    evaluate_answer,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -26,7 +29,9 @@ def evaluate(request: EvaluationRequest):
             model_answer=request.model_answer,
             rubric=request.rubric,
         )
-
+    except GeminiUnavailableError as exc:
+        logger.warning("Evaluation unavailable: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc))
     except Exception:
         logger.exception("Evaluation failed")
         raise HTTPException(

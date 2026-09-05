@@ -1,10 +1,13 @@
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 
 load_dotenv()
 
@@ -13,8 +16,25 @@ logger = logging.getLogger(__name__)
 _client = None
 
 
+class GeminiUnavailableError(RuntimeError):
+    """Raised when the Gemini API cannot be reached or configured.
+
+    Mirrors ``OCRUnavailableError`` in ``ocr_service`` so callers (the API
+    routers) can map both to a safe 503 rather than a generic 500, and so a
+    missing key or a transient provider outage never crashes the app or an
+    unrelated endpoint -- it only fails the request that needed Gemini.
+    """
+
+
 def get_model_name() -> str:
     return os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+
+
+def _request_timeout_ms() -> int:
+    try:
+        return int(os.getenv("GEMINI_TIMEOUT_MS", "30000"))
+    except ValueError:
+        return 30000
 
 
 def get_client():
@@ -22,9 +42,65 @@ def get_client():
     if _client is None:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            raise RuntimeError("GEMINI_API_KEY is not configured.")
-        _client = genai.Client(api_key=api_key)
+            raise GeminiUnavailableError("GEMINI_API_KEY is not configured.")
+        _client = genai.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(timeout=_request_timeout_ms()),
+        )
     return _client
+
+
+def _call_gemini(model_name: str, prompt: str):
+    """Call Gemini, translating provider/network failures into
+    ``GeminiUnavailableError`` so a rate limit or outage never surfaces a raw
+    provider stack trace to the client and never leaks the API key (the SDK
+    error objects below carry only HTTP status/message, no credentials)."""
+    try:
+        return get_client().models.generate_content(model=model_name, contents=prompt)
+    except GeminiUnavailableError:
+        raise  # e.g. missing API key -- already a safe, specific message
+    except genai_errors.APIError as exc:
+        if exc.code == 429:
+            logger.warning("Gemini rate limit hit (429): %s", exc.message)
+            raise GeminiUnavailableError(
+                "AI evaluation is temporarily rate-limited. Please try again shortly."
+            ) from exc
+        logger.exception("Gemini API error (code=%s)", exc.code)
+        raise GeminiUnavailableError(
+            "AI evaluation provider returned an error. Please try again later."
+        ) from exc
+    except Exception as exc:  # network errors, timeouts, SDK internals
+        logger.exception("Gemini request failed")
+        raise GeminiUnavailableError(
+            "AI evaluation is temporarily unavailable. Please try again later."
+        ) from exc
+
+
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _extract_json(raw_text: str) -> dict:
+    """Parse Gemini's JSON output, tolerating minor formatting noise.
+
+    Tries a direct parse first (the common case, given the prompt demands
+    JSON-only output); if the model wrapped the object in stray prose despite
+    that instruction, falls back to extracting the first ``{...}`` block
+    before giving up. Never guesses field values -- an unparsable response is
+    still a hard failure, not a fabricated result.
+    """
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError:
+        pass
+
+    match = _JSON_OBJECT_RE.search(raw_text)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    raise RuntimeError(f"Gemini returned non-JSON output: {raw_text[:1000]}")
 
 
 def extract_authoritative_max_score(rubric: Dict[str, Any]) -> float:
@@ -152,28 +228,20 @@ Return ONLY valid JSON in this exact structure:
 """
 
     model_name = get_model_name()
-    response = get_client().models.generate_content(
-        model=model_name,
-        contents=prompt,
-    )
+    response = _call_gemini(model_name, prompt)
 
     raw_text = response.text.strip() if response and response.text else ""
     logger.debug("Gemini response text: %s", raw_text)
 
     if not raw_text:
-        raise RuntimeError("Gemini returned an empty response.")
+        raise GeminiUnavailableError("Gemini returned an empty response.")
 
     if raw_text.startswith("```"):
         raw_text = raw_text.strip("`")
         if raw_text.startswith("json"):
             raw_text = raw_text[4:].strip()
 
-    try:
-        data = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(
-            f"Gemini returned non-JSON output: {raw_text[:1000]}"
-        ) from exc
+    data = _extract_json(raw_text)
 
     if not isinstance(data, dict):
         raise RuntimeError("Gemini output is not a valid JSON object.")
