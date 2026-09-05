@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Protocol, Sequence
 
 import numpy as np
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageFilter, ImageOps, UnidentifiedImageError
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +89,57 @@ def decode_image(image_bytes: bytes) -> np.ndarray:
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError) as exc:
         raise InvalidImageError("Uploaded file is not a valid image.") from exc
 
+
+
+DEFAULT_TARGET_LONG_SIDE = 2000
+
+
+def preprocess_for_ocr(image: np.ndarray) -> np.ndarray:
+    """Light, configurable preprocessing applied only to the array handed to
+    the OCR engine -- ``decode_image``'s own output (used directly by callers
+    and by ``test_image_safety.py``) is never mutated by this function.
+
+    Chosen deliberately narrow, not a full image-enhancement pipeline:
+
+    - **Upscale small images** (``OCR_UPSCALE``, default on): a phone photo
+      or a small scan can leave thin pen/pencil strokes only a few pixels
+      wide, which the detector under-segments or drops entirely. Upscaling
+      to a minimum long-side (``OCR_TARGET_LONG_SIDE``, default 2000px)
+      while preserving aspect ratio gives the detector more pixels to work
+      with. Never downscales.
+    - **Autocontrast** (``OCR_AUTOCONTRAST``, default on): stretches the
+      pixel value histogram (1% cutoff at each end) so faint pencil or a
+      washed-out phone photo gets real black/white separation. Cheap and,
+      unlike a fixed threshold, self-adjusting per image.
+    - **Median denoise** (``OCR_DENOISE``, default OFF): can help with
+      paper-texture/JPEG noise but a large window also erodes thin strokes,
+      and this has not been validated against a real handwriting sample in
+      this repository (none exists) -- left as an explicit opt-in rather
+      than a default, so a user who enables it does so knowingly.
+
+    Deliberately NOT done: deskewing. That needs robust angle estimation
+    (typically OpenCV/Hough-transform territory) which is not a dependency
+    of this project; a naive heuristic risks rotating legible text into
+    illegible text, which would be "artificially modifying the answer" --
+    exactly what this function must not do.
+    """
+    img = Image.fromarray(image)
+
+    if _env_bool("OCR_AUTOCONTRAST", True):
+        img = ImageOps.autocontrast(img, cutoff=1)
+
+    if _env_bool("OCR_DENOISE", False):
+        img = img.filter(ImageFilter.MedianFilter(size=3))
+
+    if _env_bool("OCR_UPSCALE", True):
+        target_long_side = int(os.getenv("OCR_TARGET_LONG_SIDE", str(DEFAULT_TARGET_LONG_SIDE)))
+        long_side = max(img.width, img.height)
+        if 0 < long_side < target_long_side:
+            scale = target_long_side / long_side
+            new_size = (round(img.width * scale), round(img.height * scale))
+            img = img.resize(new_size, Image.LANCZOS)
+
+    return np.asarray(img)
 
 
 def _bbox_from_poly(poly: Sequence[Sequence[float]]) -> List[int]:
@@ -195,6 +246,7 @@ class PaddleOCRBackend:
 
     def extract(self, image_bytes: bytes) -> OCRResult:
         image = decode_image(image_bytes)
+        image = preprocess_for_ocr(image)
         engine = self._load()
         results = engine.predict(image)
 
