@@ -15,6 +15,12 @@ downloads/
 eggs/
 .eggs/
 lib/
+# The bare `lib/` pattern above (from the standard Python .gitignore
+# template, for venv-style lib/ dirs) also matches frontend/app/lib/, which
+# is real Next.js source (the domain model / demo-data / repository layer),
+# not a build artifact. Un-ignore it explicitly.
+!frontend/app/lib/
+!frontend/app/lib/**
 lib64/
 parts/
 sdist/
