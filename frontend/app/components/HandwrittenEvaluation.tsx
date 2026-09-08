@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, FileUp, Sparkles, X } from "lucide-react";
+import { useRef, useState } from "react";
+import { AlertTriangle, FileUp, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import { ApiError, evaluateHandwrittenAnswerSheet, type PipelineResponse } from "../lib/api";
 import { StepProgress, type Step } from "./ui/StepProgress";
 import { ScoreBar } from "./ui/ScoreBar";
@@ -43,12 +43,19 @@ export default function HandwrittenEvaluation() {
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PipelineResponse | null>(null);
+  // Synchronous guard against duplicate/overlapping requests: the `busy`
+  // state-derived `disabled` prop on the buttons has a render-timing race
+  // (a fast double-click can fire twice before React re-renders with the
+  // "uploading" phase), so this is checked and set immediately, before any
+  // state update or await.
+  const submittingRef = useRef(false);
 
   const updateQuestion = (index: number, patch: Partial<QuestionInput>) =>
     setQuestions((prev) => prev.map((q, i) => (i === index ? { ...q, ...patch } : q)));
 
   const submit = async () => {
-    if (!image) return;
+    if (!image || submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     setResult(null);
     setPhase("uploading");
@@ -78,6 +85,7 @@ export default function HandwrittenEvaluation() {
       clearTimeout(ocrTimer);
       clearTimeout(segTimer);
       clearTimeout(evalTimer);
+      submittingRef.current = false;
     }
   };
 
@@ -97,7 +105,14 @@ export default function HandwrittenEvaluation() {
             <div className="flex items-center gap-3">
               <label className="cursor-pointer text-xs font-medium text-indigo-600 hover:underline">
                 Replace
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
+                <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  // Only replace the current selection with an actual new
+                  // file. If the picker was cancelled, `files` is empty --
+                  // the existing image (and its results) must stay intact,
+                  // not be silently cleared.
+                  const file = e.target.files?.[0];
+                  if (file) setImage(file);
+                }} />
               </label>
               <button onClick={() => setImage(null)} className="text-slate-400 hover:text-slate-600">
                 <X size={15} />
@@ -107,7 +122,14 @@ export default function HandwrittenEvaluation() {
         ) : (
           <label className="flex cursor-pointer items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-300 px-4 py-8 text-sm font-medium text-slate-600 hover:border-indigo-300 hover:bg-indigo-50/40">
             <FileUp size={18} />+ Add Answer Sheet Image
-            <input type="file" accept="image/*" className="hidden" onChange={(e) => setImage(e.target.files?.[0] ?? null)} />
+            <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                  // Only replace the current selection with an actual new
+                  // file. If the picker was cancelled, `files` is empty --
+                  // the existing image (and its results) must stay intact,
+                  // not be silently cleared.
+                  const file = e.target.files?.[0];
+                  if (file) setImage(file);
+                }} />
           </label>
         )}
 
@@ -117,7 +139,7 @@ export default function HandwrittenEvaluation() {
               <input
                 value={q.question_id}
                 onChange={(e) => updateQuestion(i, { question_id: e.target.value })}
-                className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
+                className="w-20 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 placeholder:text-slate-400"
                 placeholder="Q1"
               />
               <input
@@ -125,7 +147,7 @@ export default function HandwrittenEvaluation() {
                 min={1}
                 value={q.max_score}
                 onChange={(e) => updateQuestion(i, { max_score: Number(e.target.value) || 1 })}
-                className="w-24 rounded border border-slate-300 px-2 py-1 text-sm"
+                className="w-24 rounded border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 placeholder:text-slate-400"
                 placeholder="Marks"
               />
               {questions.length > 1 && (
@@ -141,14 +163,14 @@ export default function HandwrittenEvaluation() {
             <textarea
               value={q.question}
               onChange={(e) => updateQuestion(i, { question: e.target.value })}
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm leading-relaxed text-slate-900 placeholder:text-slate-400"
               rows={2}
               placeholder="Question text"
             />
             <textarea
               value={q.model_answer}
               onChange={(e) => updateQuestion(i, { model_answer: e.target.value })}
-              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-sm font-medium leading-relaxed text-slate-900 placeholder:font-normal placeholder:text-slate-400"
               rows={3}
               placeholder="Model answer"
             />
@@ -181,9 +203,25 @@ export default function HandwrittenEvaluation() {
         )}
 
         {error && (
-          <p className="flex items-center gap-2 text-sm text-rose-600">
-            <AlertTriangle size={15} /> {error}
-          </p>
+          <div className="flex items-start gap-3 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-rose-500" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-rose-800">{error}</p>
+              <p className="mt-0.5 text-xs text-rose-600">
+                Your uploaded image and question details are unchanged — retrying will re-run the same evaluation,
+                no need to upload again.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={submit}
+              disabled={busy}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+            >
+              {busy ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+              {busy ? "Retrying…" : "Retry Evaluation"}
+            </button>
+          </div>
         )}
       </div>
 
