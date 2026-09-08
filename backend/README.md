@@ -91,9 +91,14 @@ pytest            # from repo root; PaddleOCR and Gemini are faked, no key neede
 - If `paddleocr` is not installed the API still boots; `/handwritten/*` OCR
   endpoints return HTTP 503 with an explanatory message.
 - A missing/invalid `GEMINI_API_KEY`, a Gemini rate limit (429), a provider
-  error, or a network/timeout failure (`GEMINI_TIMEOUT_MS`, default 30s) all
+  error, or a network/timeout failure (`GEMINI_TIMEOUT_MS`, default 60s) all
   return HTTP 503 with a safe message from both `/evaluation/evaluate` and
   `/handwritten/evaluate` -- never a stack trace or the provider's raw error.
+- Transient provider failures (429, 500/502/503/504, DEADLINE_EXCEEDED-style
+  timeouts) are retried with exponential backoff before giving up --
+  `GEMINI_MAX_RETRIES` (default 2) retries after the initial attempt, never
+  unbounded. A permanent error (bad key, malformed request, invalid model)
+  is never retried. See `evaluation_service._call_gemini`.
 - OCR preprocessing (`OCR_UPSCALE`, `OCR_TARGET_LONG_SIDE`, `OCR_AUTOCONTRAST`,
   `OCR_DENOISE`) is applied only to the copy of the image handed to the OCR
   engine; see `ocr_service.preprocess_for_ocr` for what each does and why

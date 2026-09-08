@@ -32,7 +32,9 @@ between what's built and what's planned.
 - **Safe failure modes**: a missing `GEMINI_API_KEY`, a Gemini rate limit, a provider
   outage, or an unavailable OCR engine all return a clear error to the client (503/500
   with a safe message) — never a stack trace, a provider error string, or a fabricated
-  result.
+  result. Transient provider failures (429, 5xx, DEADLINE_EXCEEDED-style timeouts) get a
+  small bounded retry with exponential backoff first; permanent errors (bad key,
+  malformed request) are never retried.
 - **Faculty portal** (`/faculty`): dashboard, an assessment workflow (create → add
   questions/rubric → upload a real answer sheet → evaluate → publish), the standalone
   Answer Evaluation tool, a student roster, analytics (score distribution, weakest
@@ -108,7 +110,8 @@ request takes noticeably longer than subsequent ones.
 | --- | --- | --- |
 | `GEMINI_API_KEY` | — | Required for `/evaluation/evaluate` and `/handwritten/evaluate` |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Override if unavailable in your region/project |
-| `GEMINI_TIMEOUT_MS` | `30000` | Per-request timeout before failing as unavailable |
+| `GEMINI_TIMEOUT_MS` | `60000` | Per-request timeout before failing as unavailable |
+| `GEMINI_MAX_RETRIES` | `2` | Bounded retries (exponential backoff) for transient 429/5xx/timeout failures; permanent errors are never retried |
 | `OCR_LANG` / `OCR_DEVICE` | `en` / `cpu` | PaddleOCR config |
 | `OCR_UPSCALE` / `OCR_TARGET_LONG_SIDE` | `true` / `2000` | Upscale small scans before OCR |
 | `OCR_AUTOCONTRAST` | `true` | Widen contrast on faint/washed-out scans |

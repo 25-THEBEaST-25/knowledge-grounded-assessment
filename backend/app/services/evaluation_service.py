@@ -2,7 +2,8 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, List
+import time
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from google import genai
@@ -32,9 +33,9 @@ def get_model_name() -> str:
 
 def _request_timeout_ms() -> int:
     try:
-        return int(os.getenv("GEMINI_TIMEOUT_MS", "30000"))
+        return int(os.getenv("GEMINI_TIMEOUT_MS", "60000"))
     except ValueError:
-        return 30000
+        return 60000
 
 
 def get_client():
@@ -50,30 +51,92 @@ def get_client():
     return _client
 
 
-def _call_gemini(model_name: str, prompt: str):
-    """Call Gemini, translating provider/network failures into
-    ``GeminiUnavailableError`` so a rate limit or outage never surfaces a raw
-    provider stack trace to the client and never leaks the API key (the SDK
-    error objects below carry only HTTP status/message, no credentials)."""
-    try:
-        return get_client().models.generate_content(model=model_name, contents=prompt)
-    except GeminiUnavailableError:
-        raise  # e.g. missing API key -- already a safe, specific message
-    except genai_errors.APIError as exc:
+# Transient provider status codes worth a bounded retry. Anything else from
+# the API (401 bad key, 400 malformed request, 404 unknown model, ...) is a
+# permanent client/configuration problem -- retrying it only delays the
+# inevitable failure, so those are raised immediately instead.
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+
+# "2 retries after the initial request" -> 3 attempts total, never unbounded.
+_MAX_RETRIES = int(os.getenv("GEMINI_MAX_RETRIES", "2"))
+_RETRY_BACKOFF_BASE_SECONDS = 1.0
+
+
+def _retry_backoff_seconds(attempt: int) -> float:
+    """Exponential backoff for retry attempt ``attempt`` (0-indexed): 1s, 2s, 4s, ..."""
+    return _RETRY_BACKOFF_BASE_SECONDS * (2**attempt)
+
+
+def _is_retryable(exc: Exception) -> bool:
+    """Whether ``exc`` looks like a transient provider/network failure.
+
+    A ``genai_errors.APIError`` (this covers both its ``ClientError`` and
+    ``ServerError`` subclasses) carries a real status code from the API --
+    only the transient ones in ``_RETRYABLE_STATUS_CODES`` are retried.
+    Anything else that reaches here (a network error, or a client-side
+    timeout once ``GEMINI_TIMEOUT_MS`` elapses) is presumed transient: a
+    malformed request or bad configuration surfaces as a specific APIError
+    code instead, not a raw exception.
+    """
+    if isinstance(exc, genai_errors.APIError):
+        return exc.code in _RETRYABLE_STATUS_CODES
+    return True
+
+
+def _raise_as_unavailable(exc: Exception) -> None:
+    """Translate a final (non-retried or retries-exhausted) Gemini failure
+    into the safe, typed error the API routers map to a 503 -- never a raw
+    provider stack trace or the API key to the client."""
+    if isinstance(exc, genai_errors.APIError):
         if exc.code == 429:
-            logger.warning("Gemini rate limit hit (429): %s", exc.message)
             raise GeminiUnavailableError(
                 "AI evaluation is temporarily rate-limited. Please try again shortly."
             ) from exc
-        logger.exception("Gemini API error (code=%s)", exc.code)
         raise GeminiUnavailableError(
             "AI evaluation provider returned an error. Please try again later."
         ) from exc
-    except Exception as exc:  # network errors, timeouts, SDK internals
-        logger.exception("Gemini request failed")
-        raise GeminiUnavailableError(
-            "AI evaluation is temporarily unavailable. Please try again later."
-        ) from exc
+    raise GeminiUnavailableError(
+        "AI evaluation is temporarily unavailable. Please try again later."
+    ) from exc
+
+
+def _call_gemini(model_name: str, prompt: str):
+    """Call Gemini with a small bounded retry for transient failures
+    (429 / 5xx / DEADLINE_EXCEEDED-style timeouts), exponential backoff
+    between attempts, and translation of the final failure into
+    ``GeminiUnavailableError`` -- never a raw provider stack trace, never a
+    leaked API key, and never a fabricated result if every attempt fails.
+    """
+    attempts = _MAX_RETRIES + 1
+    last_exc: Optional[Exception] = None
+
+    for attempt in range(attempts):
+        try:
+            return get_client().models.generate_content(model=model_name, contents=prompt)
+        except GeminiUnavailableError:
+            raise  # e.g. missing API key -- not a provider call, never retried
+        except Exception as exc:
+            last_exc = exc
+            code = getattr(exc, "code", None)
+            retryable = _is_retryable(exc)
+            is_last_attempt = attempt == attempts - 1
+
+            if not retryable or is_last_attempt:
+                logger.warning(
+                    "Gemini call failed on attempt %d/%d (code=%s, retryable=%s) -- giving up: %s",
+                    attempt + 1, attempts, code, retryable, exc,
+                )
+                break
+
+            backoff = _retry_backoff_seconds(attempt)
+            logger.warning(
+                "Gemini call failed on attempt %d/%d (code=%s) -- retrying in %.1fs",
+                attempt + 1, attempts, code, backoff,
+            )
+            time.sleep(backoff)
+
+    assert last_exc is not None
+    _raise_as_unavailable(last_exc)
 
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
