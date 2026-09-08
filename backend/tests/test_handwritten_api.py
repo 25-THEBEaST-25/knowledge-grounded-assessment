@@ -36,7 +36,10 @@ class FakeOCR:
         return ocr_service.build_result(lines, "fake")
 
 
-def fake_evaluator(question, student_answer, model_answer, rubric):
+def fake_evaluator(question, student_answer, model_answer, rubric, ocr_confidence=1.0, image_bytes=None):
+    # ocr_confidence/image_bytes: accepted (and ignored) to match the real
+    # evaluate_answer's signature, which this fixture stands in for -- see
+    # pipeline_service._evaluator_accepts_evidence.
     return {
         "score": 7,
         "max_score": 10,
@@ -54,6 +57,11 @@ def fake_evaluator(question, student_answer, model_answer, rubric):
 @pytest.fixture(autouse=True)
 def fakes(monkeypatch):
     original = ocr_service.get_ocr_backend()
+    # Different tests reuse byte-identical synthetic images (_synthetic_png())
+    # against different fake OCR backends -- the OCR cache is keyed purely on
+    # image bytes, so without clearing it a later test could silently receive
+    # an earlier test's fake OCR result instead of exercising its own fixture.
+    ocr_service.clear_ocr_cache()
     ocr_service.set_ocr_backend(
         FakeOCR("Q1. Photosynthesis makes glucose\nQ2. Mitochondria produce ATP", conf=0.9)
     )
@@ -62,6 +70,7 @@ def fakes(monkeypatch):
     monkeypatch.setattr(backend.app.api.evaluation, "evaluate_answer", fake_evaluator)
     yield
     ocr_service.set_ocr_backend(original)
+    ocr_service.clear_ocr_cache()
 
 
 client = TestClient(app)

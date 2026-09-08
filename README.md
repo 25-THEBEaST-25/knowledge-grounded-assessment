@@ -25,6 +25,17 @@ between what's built and what's planned.
   scans) → deterministic regex-based question segmentation → one Gemini call per
   question, scoring conceptual understanding, accuracy, precision and terminology
   against the faculty's model answer and rubric.
+- **Per-question OCR evidence and uncertainty detection**: each answer's OCR confidence,
+  question-mapping confidence, and answer length are checked against configurable
+  thresholds; suspicious evidence is *flagged* (`needs_review`, `ocr_uncertain`) rather
+  than silently trusted or penalized.
+- **Visual fallback**: when an answer's evidence is uncertain, the cropped answer-region
+  image (not the whole sheet) is sent to Gemini alongside the OCR text, with explicit
+  instructions to use the image only to resolve OCR corruption, never to invent unreadable
+  content. Gated by confidence — never called for every answer by default.
+- **OCR-corruption tolerance**: the evaluation prompt tells the model OCR text may contain
+  recognition errors (e.g. "A CK" for "ACK") and not to score those as conceptual
+  mistakes, while still flagging genuinely missing content.
 - **Score integrity**: every score is hard-clamped server-side to the rubric's
   authoritative maximum, regardless of what the model returns. The student-answer text
   is explicitly delimited in the prompt as untrusted data — a prompt-injection attempt
@@ -35,10 +46,18 @@ between what's built and what's planned.
   result. Transient provider failures (429, 5xx, DEADLINE_EXCEEDED-style timeouts) get a
   small bounded retry with exponential backoff first; permanent errors (bad key,
   malformed request) are never retried.
-- **Faculty portal** (`/faculty`): dashboard, an assessment workflow (create → add
-  questions/rubric → upload a real answer sheet → evaluate → publish), the standalone
-  Answer Evaluation tool, a student roster, analytics (score distribution, weakest
-  questions, CO/PO attainment), and reports.
+- **Bounded multi-question concurrency + OCR caching**: at most `MAX_EVALUATION_CONCURRENCY`
+  Gemini calls in flight per assessment (measured to give a modest, not proportional,
+  speedup — see `backend/.env.example`), and OCR results are cached by image hash so a
+  retry after a Gemini-only failure skips straight to evaluation.
+- **Faculty material ingestion**: upload a question paper and/or model-answer document
+  (PDF/DOCX/TXT) via `POST /materials/ingest`; the same question-detection used by the
+  handwritten pipeline extracts question-wise content, which faculty review and edit
+  before it becomes part of an assessment — nothing is auto-published.
+- **Faculty portal** (`/faculty`): dashboard, an assessment workflow (manual entry *or*
+  create-from-materials → review/edit → upload a real answer sheet → evaluate → publish),
+  the standalone Answer Evaluation tool, a student roster, analytics (score distribution,
+  weakest questions, CO/PO attainment), and reports.
 - **Student portal** (`/student`): dashboard, results with full per-question breakdowns,
   an AI feedback feed, a learning-gaps view, and a profile page.
 - **Demo data, clearly labelled**: most numbers in both portals come from a hand-authored
@@ -51,8 +70,14 @@ between what's built and what's planned.
 
 No database, no authentication, no RAG/knowledge retrieval, no multi-agent evaluation, no
 diagram or code grading, and no fully-automated OBE pipeline exist yet. Faculty-created
-assessments are persisted in the browser's `localStorage`, not a shared server database —
-they are real, but private to the device that created them.
+assessments (including those created from ingested materials) are persisted in the
+browser's `localStorage`, not a shared server database — they are real, but private to the
+device that created them. Material ingestion is a stateless transform with no versioning
+or semantic alignment yet (see `backend/app/services/knowledge_repository.py` for the
+documented, unimplemented future storage interface). Handwriting-recognition accuracy on
+*genuine* handwriting remains unvalidated — no real handwriting sample exists in this
+repository or was available to test with; all OCR testing here uses synthetic printed-text
+images or extracted-document text.
 
 ---
 
@@ -71,12 +96,16 @@ frontend/  Next.js 16 (App Router) + Tailwind CSS
 
 backend/   FastAPI + PaddleOCR + google-genai (Gemini)
   app/api/        evaluation.py (generic text grading), handwritten.py
-                  (OCR / segment / full pipeline)
+                  (OCR / segment / full pipeline), materials.py
+                  (document ingestion)
   app/services/   ocr_service, segmentation_service, pipeline_service,
-                  evaluation_service
-  tests/          49 tests — segmentation, score integrity, prompt
-                  injection, image safety, OCR preprocessing, Gemini
-                  provider-failure handling, API wiring
+                  evaluation_service, ingestion_service,
+                  knowledge_repository (documented, unimplemented interface)
+  tests/          102 tests — segmentation, score integrity, prompt
+                  injection, image safety, OCR preprocessing/caching,
+                  OCR uncertainty + visual fallback, bounded concurrency,
+                  Gemini provider-failure handling, document ingestion,
+                  materials API, API wiring
 ```
 
 ---
@@ -112,6 +141,10 @@ request takes noticeably longer than subsequent ones.
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Override if unavailable in your region/project |
 | `GEMINI_TIMEOUT_MS` | `60000` | Per-request timeout before failing as unavailable |
 | `GEMINI_MAX_RETRIES` | `2` | Bounded retries (exponential backoff) for transient 429/5xx/timeout failures; permanent errors are never retried |
+| `MAX_EVALUATION_CONCURRENCY` | `3` | Bounded in-flight Gemini calls per assessment — measured modest (~7%), not proportional, speedup |
+| `OCR_CACHE_ENABLED` / `OCR_CACHE_MAX_ENTRIES` | `true` / `32` | Cache OCR results by image hash so a retry skips re-running PaddleOCR |
+| `OCR_UNCERTAINTY_CONFIDENCE_THRESHOLD` / `_MIN_ANSWER_CHARS` | `0.55` / `15` | Thresholds for flagging an answer's OCR evidence as uncertain (never penalized) |
+| `VISUAL_FALLBACK_ENABLED` | `true` | Send the cropped answer-region image to Gemini when evidence is uncertain |
 | `OCR_LANG` / `OCR_DEVICE` | `en` / `cpu` | PaddleOCR config |
 | `OCR_UPSCALE` / `OCR_TARGET_LONG_SIDE` | `true` / `2000` | Upscale small scans before OCR |
 | `OCR_AUTOCONTRAST` | `true` | Widen contrast on faint/washed-out scans |
@@ -135,7 +168,7 @@ Open http://localhost:3000 — you'll land on a Faculty/Student portal picker. S
 ```bash
 # Backend — from repo root; PaddleOCR and Gemini are faked, no key needed
 pip install pytest httpx
-pytest                          # 49 tests
+pytest                          # 102 tests
 
 # Frontend — from frontend/
 npm run lint
@@ -153,6 +186,7 @@ npm run build
 | POST | `/handwritten/ocr` | Image → PaddleOCR text + per-line confidence |
 | POST | `/handwritten/segment` | Text → question-wise segments |
 | POST | `/handwritten/evaluate` | Image → OCR → segmentation → per-question evaluation |
+| POST | `/materials/ingest` | Question paper / model-answer document (PDF/DOCX/TXT) → structured, faculty-reviewable questions |
 
 Curl examples and the full request/response shape are in `backend/README.md`.
 

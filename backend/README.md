@@ -30,6 +30,7 @@ request; the first call takes a few seconds longer.
 | POST | `/handwritten/ocr` | image -> PaddleOCR text + per-line confidence |
 | POST | `/handwritten/segment` | text -> question-wise segments |
 | POST | `/handwritten/evaluate` | image -> OCR -> segmentation -> per-question evaluation |
+| POST | `/materials/ingest` | question paper / model-answer document (PDF/DOCX/TXT) -> structured, faculty-reviewable questions |
 
 ### Vertical slice
 
@@ -103,3 +104,29 @@ pytest            # from repo root; PaddleOCR and Gemini are faked, no key neede
   `OCR_DENOISE`) is applied only to the copy of the image handed to the OCR
   engine; see `ocr_service.preprocess_for_ocr` for what each does and why
   `OCR_DENOISE` defaults off.
+- OCR results are cached by image-content hash (`OCR_CACHE_ENABLED`,
+  `OCR_CACHE_MAX_ENTRIES`) so a retry after a Gemini-only failure skips
+  straight to evaluation instead of re-running PaddleOCR. Keyed purely by
+  image bytes -- no student/session identity in the key.
+- Per-question OCR/mapping-confidence and answer-length uncertainty
+  detection (`OCR_UNCERTAINTY_CONFIDENCE_THRESHOLD`,
+  `OCR_UNCERTAINTY_MIN_ANSWER_CHARS`) flags an answer's evidence as
+  `ocr_uncertain` for review; it is never silently penalized. When flagged
+  and `VISUAL_FALLBACK_ENABLED=true`, the cropped answer-region image (not
+  the full sheet) is sent to Gemini alongside the OCR text to help resolve
+  corruption -- see `pipeline_service.build_answer_evidence` /
+  `is_uncertain_evidence`.
+- `MAX_EVALUATION_CONCURRENCY` bounds in-flight Gemini calls per assessment
+  (default 3). Measured, not assumed: a real 3-question evaluation was only
+  ~7% faster at concurrency=3 than fully sequential, because the Gemini API
+  appears to serialize concurrent requests from one API key rather than
+  processing them in true parallel. See the comment on
+  `pipeline_service._max_evaluation_concurrency` for the benchmark.
+- `/materials/ingest` reuses the same deterministic question-marker
+  segmentation as the handwritten pipeline against extracted document text
+  (`ingestion_service.py`; pypdf for PDF, python-docx for DOCX). It is a
+  stateless transform -- nothing is persisted server-side, and faculty must
+  review/edit the extracted questions before they become part of an
+  assessment. There is no real vector/knowledge-base storage yet; see
+  `knowledge_repository.py` for the documented, unimplemented future
+  interface (`AcademicKnowledgeRepository`).

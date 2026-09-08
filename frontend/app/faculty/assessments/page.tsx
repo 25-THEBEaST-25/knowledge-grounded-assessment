@@ -2,14 +2,15 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Loader2, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, FileUp, Loader2, Plus, Sparkles, Trash2, X } from "lucide-react";
 import { AppShell } from "../../components/AppShell";
 import { Card, CardBody, CardHeader } from "../../components/ui/Card";
-import { DemoDataBadge, LocalOnlyBadge } from "../../components/ui/Badge";
+import { Badge, DemoDataBadge, LocalOnlyBadge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { getAssessments, getSubjectById, getSubjects } from "../../lib/repository";
 import { newAssessmentId, saveLocalAssessment } from "../../lib/localAssessments";
 import { useClientData } from "../../lib/useClientData";
+import { ApiError, ingestMaterialDocument, type IngestedQuestion } from "../../lib/api";
 import type { Question, RubricCriterion } from "../../lib/domain";
 
 interface DraftQuestion {
@@ -18,21 +19,67 @@ interface DraftQuestion {
   maxScore: number;
   topic: string;
   criteria: RubricCriterion[];
+  /** Set only for questions that came from document ingestion (B1-B4) --
+   * preserves the original extracted question_id (so it lines up with the
+   * source document if re-ingested) and surfaces provenance/confidence in
+   * the review UI. Absent for manually-typed questions. */
+  extracted?: {
+    questionId: string;
+    mappingConfidence: number;
+    sources: string[];
+    hasQuestionText: boolean;
+    hasModelAnswer: boolean;
+  };
+}
+
+function defaultCriteria(maxScore: number): RubricCriterion[] {
+  const c = (frac: number) => Math.round(maxScore * frac * 10) / 10;
+  return [
+    { name: "Concept", maxScore: c(0.4) },
+    { name: "Accuracy", maxScore: c(0.3) },
+    { name: "Precision", maxScore: c(0.2) },
+    { name: "Terminology", maxScore: c(0.1) },
+  ];
 }
 
 function emptyQuestion(): DraftQuestion {
-  return {
-    text: "",
-    modelAnswer: "",
-    maxScore: 10,
-    topic: "",
-    criteria: [
-      { name: "Concept", maxScore: 4 },
-      { name: "Accuracy", maxScore: 3 },
-      { name: "Precision", maxScore: 2 },
-      { name: "Terminology", maxScore: 1 },
-    ],
-  };
+  return { text: "", modelAnswer: "", maxScore: 10, topic: "", criteria: defaultCriteria(10) };
+}
+
+/** B3: align a question-paper ingestion with a model-answer ingestion by
+ * normalized question_id -- the primary, most reliable alignment strategy
+ * per the brief. A question present in only one document is kept (not
+ * dropped) with the missing half left blank, and its mapping confidence
+ * flagged, so faculty can complete it during review rather than the system
+ * silently guessing or silently discarding it. */
+function alignIngestedQuestions(
+  questionPaper: IngestedQuestion[],
+  modelAnswers: IngestedQuestion[],
+): DraftQuestion[] {
+  const byId = new Map<string, { qp?: IngestedQuestion; ma?: IngestedQuestion }>();
+  for (const q of questionPaper) byId.set(q.question_id, { ...byId.get(q.question_id), qp: q });
+  for (const q of modelAnswers) byId.set(q.question_id, { ...byId.get(q.question_id), ma: q });
+
+  return Array.from(byId.entries())
+    .sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(([questionId, { qp, ma }]) => {
+      const maxScore = qp?.max_score ?? ma?.max_score ?? 10;
+      const mappingConfidence = Math.min(qp?.mapping_confidence ?? 1, ma?.mapping_confidence ?? 1);
+      return {
+        text: qp?.question_text ?? "",
+        modelAnswer: ma?.model_answer ?? "",
+        maxScore,
+        topic: "",
+        criteria: defaultCriteria(maxScore),
+        extracted: {
+          questionId,
+          mappingConfidence,
+          sources: [qp?.source, ma?.source].filter((s): s is string => !!s),
+          hasQuestionText: !!qp,
+          hasModelAnswer: !!ma,
+        },
+      };
+    });
 }
 
 export default function AssessmentsPage() {
@@ -125,6 +172,7 @@ export default function AssessmentsPage() {
 
 function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; onCreated: () => void }) {
   const subjects = getSubjects();
+  const [mode, setMode] = useState<"manual" | "materials">("manual");
   const [title, setTitle] = useState("");
   const [subjectId, setSubjectId] = useState(subjects[0]?.id ?? "");
   const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -148,11 +196,11 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
     if (!title.trim()) return setError("Enter an assessment title.");
     if (!subjectId) return setError("Select a subject.");
     if (questions.some((q) => !q.text.trim() || !q.modelAnswer.trim())) {
-      return setError("Every question needs question text and a model answer.");
+      return setError("Every question needs question text and a model answer — check any extracted questions flagged incomplete below.");
     }
 
     const builtQuestions: Question[] = questions.map((q, i) => ({
-      id: `Q${i + 1}`,
+      id: q.extracted?.questionId ?? `Q${i + 1}`,
       text: q.text.trim(),
       modelAnswer: q.modelAnswer.trim(),
       maxScore: Number(q.maxScore) || 0,
@@ -192,7 +240,7 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="e.g. NLP — TT3"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
             />
           </label>
           <label className="block">
@@ -200,7 +248,7 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
             <select
               value={subjectId}
               onChange={(e) => setSubjectId(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             >
               {subjects.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -215,20 +263,50 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
               type="date"
               value={date}
               onChange={(e) => setDate(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
             />
           </label>
         </div>
 
+        <div className="flex gap-2 border-b border-slate-200">
+          {(["manual", "materials"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium ${
+                mode === m ? "border-indigo-600 text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {m === "manual" ? "Manual entry" : "Create from materials"}
+            </button>
+          ))}
+        </div>
+
+        {mode === "materials" && (
+          <MaterialsIntake onExtracted={(extracted) => setQuestions(extracted)} />
+        )}
+
         <div className="space-y-4">
           {questions.map((q, qi) => (
             <div key={qi} className="rounded-xl border border-slate-200 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold text-slate-800">Question {qi + 1}</span>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-slate-800">
+                  {q.extracted?.questionId ?? `Question ${qi + 1}`}
+                </span>
+                {q.extracted && (
+                  <>
+                    <Badge variant={q.extracted.mappingConfidence >= 1 ? "live" : "review"}>
+                      {q.extracted.mappingConfidence >= 1 ? "Confidently extracted" : "Low-confidence extraction — review"}
+                    </Badge>
+                    {!q.extracted.hasQuestionText && <Badge variant="danger">No question text found</Badge>}
+                    {!q.extracted.hasModelAnswer && <Badge variant="danger">No model answer found</Badge>}
+                    <span className="text-xs text-slate-400">Source: {q.extracted.sources.join(", ") || "—"}</span>
+                  </>
+                )}
                 {questions.length > 1 && (
                   <button
                     onClick={() => setQuestions((prev) => prev.filter((_, i) => i !== qi))}
-                    className="flex items-center gap-1 text-xs font-medium text-rose-600 hover:underline"
+                    className="ml-auto flex items-center gap-1 text-xs font-medium text-rose-600 hover:underline"
                   >
                     <Trash2 size={13} /> Remove
                   </button>
@@ -240,21 +318,21 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
                   onChange={(e) => updateQuestion(qi, { text: e.target.value })}
                   placeholder="Question text"
                   rows={2}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
                 />
                 <textarea
                   value={q.modelAnswer}
                   onChange={(e) => updateQuestion(qi, { modelAnswer: e.target.value })}
                   placeholder="Model answer"
                   rows={3}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 placeholder:font-normal placeholder:text-slate-400"
                 />
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <input
                     value={q.topic}
                     onChange={(e) => updateQuestion(qi, { topic: e.target.value })}
                     placeholder="Topic (for learning-gap tracking, optional)"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400"
                   />
                 </div>
 
@@ -268,14 +346,14 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
                         <input
                           value={c.name}
                           onChange={(e) => updateCriterion(qi, ci, { name: e.target.value })}
-                          className="w-1/2 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                          className="w-1/2 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
                         />
                         <input
                           type="number"
                           min={0}
                           value={c.maxScore}
                           onChange={(e) => updateCriterion(qi, ci, { maxScore: Number(e.target.value) || 0 })}
-                          className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
+                          className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900"
                         />
                         <span className="text-xs text-slate-400">marks</span>
                       </div>
@@ -288,7 +366,7 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
                       min={0}
                       value={q.maxScore}
                       onChange={(e) => updateQuestion(qi, { maxScore: Number(e.target.value) || 0 })}
-                      className="mx-1 w-20 rounded border border-slate-300 px-2 py-1 text-xs"
+                      className="mx-1 w-20 rounded border border-slate-300 bg-white px-2 py-1 text-xs text-slate-900"
                     />
                     marks (criteria are for the AI evaluator&apos;s reference; they don&apos;t need to sum exactly)
                   </p>
@@ -325,5 +403,99 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
         </div>
       </CardBody>
     </Card>
+  );
+}
+
+/** B1/B2/B3/B4: upload a question paper and/or model-answer document, run
+ * them through the real /materials/ingest endpoint, align by question_id,
+ * and hand the result to the parent for review/editing -- extraction never
+ * publishes anything by itself (B4). */
+function MaterialsIntake({ onExtracted }: { onExtracted: (questions: DraftQuestion[]) => void }) {
+  const [questionPaperFile, setQuestionPaperFile] = useState<File | null>(null);
+  const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+
+  const extract = async () => {
+    if (!modelAnswerFile && !questionPaperFile) return;
+    setLoading(true);
+    setError(null);
+    setSummary(null);
+    try {
+      const [qp, ma] = await Promise.all([
+        questionPaperFile ? ingestMaterialDocument(questionPaperFile, "question_paper") : Promise.resolve(null),
+        modelAnswerFile ? ingestMaterialDocument(modelAnswerFile, "model_answer") : Promise.resolve(null),
+      ]);
+      const aligned = alignIngestedQuestions(qp?.questions ?? [], ma?.questions ?? []);
+      if (aligned.length === 0) {
+        setError("No questions could be detected in the uploaded document(s). You can still add questions manually below.");
+        return;
+      }
+      onExtracted(aligned);
+      const lowConfidence = aligned.filter((q) => (q.extracted?.mappingConfidence ?? 1) < 1).length;
+      setSummary(
+        `Extracted ${aligned.length} question${aligned.length === 1 ? "" : "s"}` +
+          (lowConfidence > 0 ? ` — ${lowConfidence} need review (low-confidence extraction).` : ". Review below before saving."),
+      );
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Document ingestion failed. Please try again later.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+      <p className="text-sm text-slate-600">
+        Upload your question paper and/or approved model answers (PDF, DOCX or TXT). Extracted questions appear below
+        for you to review and edit — nothing is saved until you click <span className="font-medium">Save assessment</span>.
+      </p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <FileSlot label="Question paper (optional)" file={questionPaperFile} onChange={setQuestionPaperFile} />
+        <FileSlot label="Model answers" file={modelAnswerFile} onChange={setModelAnswerFile} />
+      </div>
+      <button
+        onClick={extract}
+        disabled={loading || (!questionPaperFile && !modelAnswerFile)}
+        className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+      >
+        {loading ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
+        {loading ? "Extracting…" : "Extract questions"}
+      </button>
+      {error && (
+        <p className="flex items-center gap-2 text-sm text-rose-600">
+          <AlertTriangle size={15} /> {error}
+        </p>
+      )}
+      {summary && <p className="text-sm text-emerald-700">{summary}</p>}
+      <p className="text-xs text-slate-500">
+        This calls the real <code className="rounded bg-slate-100 px-1 py-0.5">/materials/ingest</code> endpoint
+        (PaddleOCR-free text extraction + the same question-detection used by the handwritten pipeline). Marks are
+        only filled in when the document states them explicitly (e.g. &quot;[10 marks]&quot;) — otherwise you set
+        them below.
+      </p>
+    </div>
+  );
+}
+
+function FileSlot({ label, file, onChange }: { label: string; file: File | null; onChange: (f: File | null) => void }) {
+  return (
+    <label className="flex cursor-pointer flex-col gap-1">
+      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className="flex items-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-white px-3 py-3 text-sm text-slate-600 hover:border-indigo-300 hover:bg-indigo-50/40">
+        <FileUp size={16} className="shrink-0 text-indigo-500" />
+        <span className="truncate">{file ? file.name : "Choose a file (.pdf, .docx, .txt)"}</span>
+      </span>
+      <input
+        type="file"
+        accept=".pdf,.docx,.txt"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onChange(f);
+        }}
+      />
+    </label>
   );
 }

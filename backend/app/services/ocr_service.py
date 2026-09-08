@@ -7,10 +7,12 @@ machines that do not have PaddlePaddle installed; such machines get a clear
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
 import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import List, Optional, Protocol, Sequence
 
@@ -56,6 +58,12 @@ class OCRResult:
     lines: List[OCRLine] = field(default_factory=list)
     mean_confidence: float = 0.0
     engine: str = "paddleocr"
+    # The exact array handed to the OCR engine (post decode + preprocess), so
+    # callers (pipeline_service) can crop per-question regions for the visual
+    # fallback (A5) without re-decoding the upload -- bbox coordinates from
+    # `lines` are in this array's coordinate space, not the original upload's.
+    # Never serialised into an API response; internal use only.
+    image: Optional[np.ndarray] = None
 
     @property
     def is_empty(self) -> bool:
@@ -182,11 +190,44 @@ def order_lines(lines: List[OCRLine], min_overlap: float = 0.5) -> List[OCRLine]
     return ordered
 
 
-def build_result(lines: List[OCRLine], engine: str) -> OCRResult:
+def build_result(lines: List[OCRLine], engine: str, image: Optional[np.ndarray] = None) -> OCRResult:
     ordered = order_lines(lines)
     text = "\n".join(l.text for l in ordered)
     mean_conf = float(np.mean([l.confidence for l in ordered])) if ordered else 0.0
-    return OCRResult(text=text, lines=ordered, mean_confidence=round(mean_conf, 4), engine=engine)
+    return OCRResult(text=text, lines=ordered, mean_confidence=round(mean_conf, 4), engine=engine, image=image)
+
+
+def crop_region(image: np.ndarray, bbox: Sequence[int], padding: int = 12) -> bytes:
+    """Crop ``bbox`` out of ``image`` (with a small padding for context) and
+    PNG-encode it. Used to send a specific answer region to Gemini's visual
+    fallback (A5/A3) instead of the whole answer sheet. Coordinates are
+    clamped to the image bounds; an empty/degenerate crop falls back to the
+    full image rather than raising.
+    """
+    h, w = image.shape[:2]
+    x0, y0, x1, y1 = bbox
+    x0 = max(0, int(x0) - padding)
+    y0 = max(0, int(y0) - padding)
+    x1 = min(w, int(x1) + padding)
+    y1 = min(h, int(y1) + padding)
+    if x1 <= x0 or y1 <= y0:
+        crop = image
+    else:
+        crop = image[y0:y1, x0:x1]
+    buf = io.BytesIO()
+    Image.fromarray(crop).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def union_bbox(boxes: Sequence[Sequence[int]]) -> Optional[List[int]]:
+    """Smallest bbox enclosing all of ``boxes``, or None if empty."""
+    if not boxes:
+        return None
+    xs0 = [b[0] for b in boxes]
+    ys0 = [b[1] for b in boxes]
+    xs1 = [b[2] for b in boxes]
+    ys1 = [b[3] for b in boxes]
+    return [min(xs0), min(ys0), max(xs1), max(ys1)]
 
 
 class PaddleOCRBackend:
@@ -262,7 +303,7 @@ class PaddleOCRBackend:
                 score = float(scores[idx]) if idx < len(scores) else 0.0
                 bbox = _bbox_from_poly(polys[idx]) if idx < len(polys) else [0, 0, 0, 0]
                 lines.append(OCRLine(text=text, confidence=round(score, 4), bbox=bbox))
-        return build_result(lines, self.engine_name)
+        return build_result(lines, self.engine_name, image=image)
 
 
 _default_backend: OCRBackend = PaddleOCRBackend()
@@ -278,5 +319,55 @@ def set_ocr_backend(backend: OCRBackend) -> None:
     _default_backend = backend
 
 
+# OCR is a deterministic, pure function of (image bytes, preprocessing config)
+# -- safe to cache. The "Retry Evaluation" flow (frontend) re-sends the exact
+# same image on every retry, which previously re-ran PaddleOCR from scratch
+# each time; this makes a retry after a Gemini-only failure skip straight to
+# evaluation. Bounded (OCR_CACHE_MAX_ENTRIES, default 32) with LRU eviction so
+# a busy server can't grow this unboundedly. Keyed purely by image content
+# hash -- there is no student/session identity in the key, so a cache hit can
+# never mix one student's OCR result into another's evaluation; two different
+# students submitting byte-identical images is not a leak, it's the same OCR
+# result being (correctly) reused for the same input.
+_ocr_cache: "OrderedDict[str, OCRResult]" = OrderedDict()
+_ocr_cache_lock = threading.Lock()
+
+
+def _ocr_cache_max_entries() -> int:
+    try:
+        return int(os.getenv("OCR_CACHE_MAX_ENTRIES", "32"))
+    except ValueError:
+        return 32
+
+
+def _ocr_cache_enabled() -> bool:
+    return _env_bool("OCR_CACHE_ENABLED", True)
+
+
+def clear_ocr_cache() -> None:
+    """Used by tests to guarantee isolation between cases."""
+    with _ocr_cache_lock:
+        _ocr_cache.clear()
+
+
 def extract_text(image_bytes: bytes) -> OCRResult:
-    return get_ocr_backend().extract(image_bytes)
+    if not _ocr_cache_enabled():
+        return get_ocr_backend().extract(image_bytes)
+
+    key = hashlib.sha256(image_bytes).hexdigest()
+    with _ocr_cache_lock:
+        cached = _ocr_cache.get(key)
+        if cached is not None:
+            _ocr_cache.move_to_end(key)
+            logger.debug("OCR cache hit for %s", key[:12])
+            return cached
+
+    result = get_ocr_backend().extract(image_bytes)
+
+    with _ocr_cache_lock:
+        _ocr_cache[key] = result
+        _ocr_cache.move_to_end(key)
+        while len(_ocr_cache) > _ocr_cache_max_entries():
+            _ocr_cache.popitem(last=False)
+
+    return result

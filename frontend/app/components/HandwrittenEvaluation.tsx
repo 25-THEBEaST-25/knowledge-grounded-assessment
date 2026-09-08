@@ -267,9 +267,27 @@ export default function HandwrittenEvaluation() {
                       {r.score} / {r.max_score}
                     </span>
                     <ScoreBar percent={p} className="w-24" />
-                    <span className="text-xs text-slate-500">confidence {pct(r.combined_confidence)}</span>
+                    <span className="text-xs text-slate-500">
+                      OCR {pct(r.ocr_confidence)} · eval {pct(r.confidence)} · combined {pct(r.combined_confidence)}
+                    </span>
                     {r.needs_review && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">review</span>
+                    )}
+                    {r.ocr_uncertain && (
+                      <span
+                        className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800"
+                        title="Low OCR confidence, an uncertain question mapping, or a suspiciously short answer -- not penalized, flagged for a human look."
+                      >
+                        OCR uncertain
+                      </span>
+                    )}
+                    {r.visual_fallback_used && (
+                      <span
+                        className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-800"
+                        title="OCR confidence was low, so the answer-region image (not just OCR text) was also sent to the evaluator."
+                      >
+                        image-assisted
+                      </span>
                     )}
                     {!r.answer_detected && (
                       <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-medium text-rose-800">no answer found</span>

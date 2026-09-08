@@ -27,6 +27,9 @@ export interface PipelineQuestionResult {
   ocr_confidence: number;
   combined_confidence: number;
   needs_review: boolean;
+  mapping_confidence: number;
+  ocr_uncertain: boolean;
+  visual_fallback_used: boolean;
 }
 
 export interface PipelineResponse {
@@ -93,6 +96,62 @@ export async function evaluateHandwrittenAnswerSheet(
       detail = res.statusText;
     }
     throw new ApiError(res.status, friendlyMessage(res.status, detail));
+  }
+
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Faculty material ingestion (B1/B2) -- the other real backend integration.
+// ---------------------------------------------------------------------------
+
+export interface IngestedQuestion {
+  question_id: string;
+  question_text: string;
+  model_answer: string;
+  max_score: number | null;
+  source: string;
+  mapping_confidence: number;
+  detected: boolean;
+}
+
+export interface MaterialIngestionResponse {
+  questions: IngestedQuestion[];
+  raw_text_preview: string;
+  extraction_engine: string;
+}
+
+function friendlyIngestionMessage(status: number, detail: string): string {
+  if (status === 400) return detail || "This document could not be read. Please check the file and try again.";
+  if (status === 413) return "File exceeds the 15 MB upload limit.";
+  if (status === 422) return detail || "Please check the upload details and try again.";
+  return "Document ingestion failed. Please try again later.";
+}
+
+export async function ingestMaterialDocument(
+  file: File,
+  kind: "question_paper" | "model_answer",
+): Promise<MaterialIngestionResponse> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("kind", kind);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/materials/ingest`, { method: "POST", body: form });
+  } catch {
+    throw new ApiError(0, "Could not reach the backend API. Is it running?");
+  }
+
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = await res.json();
+      detail = typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+    } catch {
+      detail = res.statusText;
+    }
+    throw new ApiError(res.status, friendlyIngestionMessage(res.status, detail));
   }
 
   return res.json();

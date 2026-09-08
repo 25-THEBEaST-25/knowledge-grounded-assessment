@@ -56,6 +56,14 @@ class Segment:
     end_line: int
     marker_line: Optional[str] = None
     detected: bool = True
+    # How sure segmentation is that `text` actually belongs to `question_id`,
+    # independent of OCR/evaluator confidence (A7). 1.0: a real marker (e.g.
+    # "Q1.") was matched. 0.5: no marker was found anywhere in the page and
+    # this segment is the entire-text fallback assigned to the first expected
+    # question -- plausible for a genuinely single-question/unmarked answer,
+    # but never a confident match, so it must not be silently treated as one.
+    # 0.0: an expected question was never found at all (`detected=False`).
+    mapping_confidence: float = 1.0
 
 
 @dataclass
@@ -208,6 +216,7 @@ def segment_answers(
                     start_line=0,
                     end_line=max(0, len(lines) - 1),
                     detected=True,
+                    mapping_confidence=0.5,
                 )
             )
             result.unassigned_preamble = ""
@@ -229,6 +238,7 @@ def segment_answers(
                         start_line=-1,
                         end_line=-1,
                         detected=False,
+                        mapping_confidence=0.0,
                     )
                 )
                 present.add(qid.lower())
@@ -247,6 +257,7 @@ def _merge_duplicates(segments: Iterable[Segment]) -> List[Segment]:
             prev.text = (prev.text + "\n" + seg.text).strip()
             prev.end_line = max(prev.end_line, seg.end_line)
             prev.detected = prev.detected or seg.detected
+            prev.mapping_confidence = min(prev.mapping_confidence, seg.mapping_confidence)
         else:
             merged[key] = seg
     return list(merged.values())

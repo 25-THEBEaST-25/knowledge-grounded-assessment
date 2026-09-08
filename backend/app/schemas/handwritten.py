@@ -30,6 +30,9 @@ class SegmentOut(BaseModel):
     end_line: int
     marker_line: Optional[str] = None
     detected: bool = True
+    mapping_confidence: float = Field(
+        default=1.0, ge=0, le=1, description="How sure segmentation is this text belongs to this question_id."
+    )
 
 
 class SegmentResponse(BaseModel):
@@ -58,6 +61,15 @@ class QuestionResult(EvaluationResponse):
     ocr_confidence: float = Field(ge=0, le=1)
     combined_confidence: float = Field(ge=0, le=1)
     needs_review: bool
+    mapping_confidence: float = Field(
+        default=1.0, ge=0, le=1, description="How sure segmentation is this answer belongs to this question."
+    )
+    ocr_uncertain: bool = Field(
+        default=False, description="True if OCR confidence, mapping confidence, or answer length looked suspicious."
+    )
+    visual_fallback_used: bool = Field(
+        default=False, description="True if the answer-region image (not just OCR text) was sent to the evaluator."
+    )
 
 
 class HandwrittenEvaluationResponse(BaseModel):

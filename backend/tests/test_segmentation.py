@@ -65,3 +65,35 @@ def test_duplicate_markers_are_merged():
 def test_empty_text():
     result = segment_answers("")
     assert result.segments == []
+
+
+def test_mapping_confidence_full_for_real_marker():
+    result = segment_answers("Q1. a real answer")
+    assert result.segments[0].mapping_confidence == 1.0
+
+
+def test_mapping_confidence_low_for_undetected_expected_question():
+    result = segment_answers("Q1. answer one", expected_question_ids=["Q1", "Q2"])
+    q2 = next(s for s in result.segments if s.question_id == "Q2")
+    assert q2.detected is False
+    assert q2.mapping_confidence == 0.0
+
+
+def test_mapping_confidence_medium_for_unmarked_fallback():
+    """No markers anywhere in the text -- the whole thing is assigned to the
+    first expected question as a guess, not a confident detection."""
+    result = segment_answers("just a wall of text with no question markers", expected_question_ids=["Q1"])
+    assert result.segments[0].detected is True
+    assert result.segments[0].mapping_confidence == 0.5
+
+
+def test_mapping_confidence_takes_minimum_on_merge():
+    """Merging must not let a confident fragment silently upgrade an unsure
+    one -- the merged segment keeps the lower (more conservative) of the two."""
+    from backend.app.services.segmentation_service import Segment, _merge_duplicates
+
+    confident = Segment(question_id="Q1", text="part one", start_line=0, end_line=0, mapping_confidence=1.0)
+    unsure = Segment(question_id="Q1", text="continued", start_line=2, end_line=2, mapping_confidence=0.5)
+    merged = _merge_duplicates([confident, unsure])
+    assert len(merged) == 1
+    assert merged[0].mapping_confidence == 0.5

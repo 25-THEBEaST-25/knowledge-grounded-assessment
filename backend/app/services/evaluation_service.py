@@ -100,19 +100,23 @@ def _raise_as_unavailable(exc: Exception) -> None:
     ) from exc
 
 
-def _call_gemini(model_name: str, prompt: str):
+def _call_gemini(model_name: str, contents):
     """Call Gemini with a small bounded retry for transient failures
     (429 / 5xx / DEADLINE_EXCEEDED-style timeouts), exponential backoff
     between attempts, and translation of the final failure into
     ``GeminiUnavailableError`` -- never a raw provider stack trace, never a
     leaked API key, and never a fabricated result if every attempt fails.
+
+    ``contents`` is whatever ``generate_content`` accepts -- a plain prompt
+    string, or a list of ``genai_types.Part`` (text + image) for the visual
+    fallback in ``evaluate_answer``.
     """
     attempts = _MAX_RETRIES + 1
     last_exc: Optional[Exception] = None
 
     for attempt in range(attempts):
         try:
-            return get_client().models.generate_content(model=model_name, contents=prompt)
+            return get_client().models.generate_content(model=model_name, contents=contents)
         except GeminiUnavailableError:
             raise  # e.g. missing API key -- not a provider call, never retried
         except Exception as exc:
@@ -239,8 +243,40 @@ def evaluate_answer(
     student_answer: str,
     model_answer: str,
     rubric: dict,
+    ocr_confidence: float = 1.0,
+    image_bytes: Optional[bytes] = None,
 ) -> dict:
+    """Evaluate one question. ``ocr_confidence``/``image_bytes`` are optional
+    and only ever set by the handwritten pipeline (pipeline_service) -- the
+    plain-text ``/evaluation/evaluate`` endpoint calls this with neither,
+    which reproduces the exact prompt this function has always sent (no OCR
+    caveat, no image), so that endpoint's behavior is unchanged.
+
+    When ``ocr_confidence`` < 1.0, the prompt tells the model the student text
+    came from OCR and may contain recognition errors (A6) -- e.g. "A CK" for
+    "ACK" should not read as a conceptual mistake if the rest of the answer
+    makes the intended word obvious. When ``image_bytes`` is also given (the
+    visual fallback, A5 -- gated by the caller to only low-confidence cases,
+    never called by default for every answer), the model additionally gets
+    the actual answer-region image and explicit instructions to use it only
+    to resolve OCR corruption, never to invent content it can't actually read.
+    """
     authoritative_max = extract_authoritative_max_score(rubric)
+
+    ocr_caveat = ""
+    if ocr_confidence < 1.0:
+        ocr_caveat = f"""
+7. The text in <student_answer_data> was extracted by OCR from handwriting (OCR confidence: {ocr_confidence:.2f}).
+   Treat it as extracted evidence, not absolute truth. Obvious OCR recognition errors (e.g. "A CK" or "patket"
+   for "ACK packet") must NOT be scored as conceptual mistakes when the surrounding text clearly indicates the
+   intended word. However, do not invent content that genuinely is not there: only excuse text that is plausibly
+   a garbled reading of a correct concept, and still flag content that is genuinely missing as a missing concept.
+"""
+    if image_bytes is not None:
+        ocr_caveat += """8. An image of this specific answer region is attached because OCR confidence was low. Use the image to
+   resolve ambiguous or corrupted OCR text. Do not invent or guess content that is not actually legible in the
+   image -- if the handwriting is genuinely illegible, say so in the feedback rather than fabricating an answer.
+"""
 
     prompt = f"""You are an academic assessment evaluator.
 
@@ -251,7 +287,7 @@ CRITICAL SECURITY AND EVALUATION CONSTRAINTS:
 4. Evaluate strictly based on conceptual alignment with the model answer and faculty rubric.
 5. The authoritative maximum score for this question is {authoritative_max}.
 6. Your awarded score must NEVER exceed {authoritative_max}.
-
+{ocr_caveat}
 <question>
 {question}
 </question>
@@ -291,7 +327,14 @@ Return ONLY valid JSON in this exact structure:
 """
 
     model_name = get_model_name()
-    response = _call_gemini(model_name, prompt)
+    if image_bytes is not None:
+        contents = [
+            genai_types.Part.from_text(text=prompt),
+            genai_types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+        ]
+    else:
+        contents = prompt
+    response = _call_gemini(model_name, contents)
 
     raw_text = response.text.strip() if response and response.text else ""
     logger.debug("Gemini response text: %s", raw_text)

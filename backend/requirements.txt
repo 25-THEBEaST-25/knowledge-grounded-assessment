@@ -18,6 +18,11 @@ python-multipart==0.0.32
 # AI evaluation (POST /evaluation/evaluate)
 google-genai==2.20.0
 
+# Faculty material ingestion (POST /materials/*): text extraction from
+# uploaded model-answer/question-paper documents. TXT needs neither.
+pypdf==6.18.0
+python-docx==1.2.0
+
 # Handwritten OCR pipeline (POST /handwritten/*)
 # PaddlePaddle 3.3.1 + PaddleOCR 3.7 (Python 3.10 - 3.13). oneDNN is disabled by
 # default in ocr_service because paddle 3.3.x fails on the PP-OCRv6 models with it.
