@@ -1,3 +1,4 @@
+![CI](https://github.com/25-THEBEaST-25/knowledge-grounded-assessment/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.13-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
 ![Next.js](https://img.shields.io/badge/Next.js-Frontend-black)
@@ -167,13 +168,17 @@ Open http://localhost:3000 — you'll land on a Faculty/Student portal picker. S
 
 ```bash
 # Backend — from repo root; PaddleOCR and Gemini are faked, no key needed
-pip install pytest httpx
+pip install -r backend/requirements-dev.txt   # or: pip install pytest httpx
 pytest                          # 102 tests
 
 # Frontend — from frontend/
 npm run lint
 npm run build
 ```
+
+CI (`.github/workflows/ci.yml`) runs the backend suite on Python 3.13 and the frontend
+lint + build on every push and PR to `main`. It skips installing PaddleOCR/PaddlePaddle
+(~1 GB) because the tests fake the OCR engine; everything else is installed for real.
 
 ---
 
