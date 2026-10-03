@@ -31,6 +31,31 @@ jobs:
           GEMINI_API_KEY: ""
         run: python -m pytest -q
 
+  migrations:
+    # Real PostgreSQL: upgrade, downgrade, upgrade again. Verifies JSONB/UUID/FK DDL for real.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: snaptix
+          POSTGRES_PASSWORD: ci_password
+          POSTGRES_DB: snaptix
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U snaptix" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://snaptix:ci_password@localhost:5432/snaptix
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install "sqlalchemy==2.0.54" "alembic==1.20.0" "psycopg[binary]==3.3.6"
+      - run: alembic -c backend/alembic.ini upgrade head
+      - run: alembic -c backend/alembic.ini downgrade base
+      - run: alembic -c backend/alembic.ini upgrade head
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

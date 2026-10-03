@@ -82,6 +82,13 @@ images or extracted-document text.
 
 ---
 
+## Assessment workflow (live backend)
+
+A database-backed, RAG-grounded, faculty-reviewed assessment flow lives under `/faculty/workflow`. See
+[docs/assessment-workflow.md](docs/assessment-workflow.md) for setup, the demo script, tables and limitations.
+
+---
+
 ## Architecture
 
 ```
@@ -102,7 +109,7 @@ backend/   FastAPI + PaddleOCR + google-genai (Gemini)
   app/services/   ocr_service, segmentation_service, pipeline_service,
                   evaluation_service, ingestion_service,
                   knowledge_repository (documented, unimplemented interface)
-  tests/          102 tests — segmentation, score integrity, prompt
+  tests/          140 tests — segmentation, score integrity, prompt
                   injection, image safety, OCR preprocessing/caching,
                   OCR uncertainty + visual fallback, bounded concurrency,
                   Gemini provider-failure handling, document ingestion,
@@ -169,7 +176,7 @@ Open http://localhost:3000 — you'll land on a Faculty/Student portal picker. S
 ```bash
 # Backend — from repo root; PaddleOCR and Gemini are faked, no key needed
 pip install -r backend/requirements-dev.txt   # or: pip install pytest httpx
-pytest                          # 102 tests
+pytest                          # 140 tests
 
 # Frontend — from frontend/
 npm run lint
