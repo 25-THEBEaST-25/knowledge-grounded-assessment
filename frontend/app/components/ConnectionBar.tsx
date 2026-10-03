@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/set-state-in-effect -- data is fetched after mount; state is set after awaited calls */
 "use client";
 
 import { useEffect, useState } from "react";
