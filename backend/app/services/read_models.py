@@ -88,7 +88,9 @@ def dashboard(db, assessment: m.Assessment) -> Dict:
                                   "subquestion": sq.full_id, "reasons": r.review_reasons})
     docs = [{"kind": d.kind, "filename": d.filename, "approved": d.approved, "index_status": d.index_status, "version": d.version}
             for d in db.query(m.Document).filter_by(assessment_id=assessment.id)]
-    return {"assessment": {"id": str(assessment.id), "title": assessment.title, "status": assessment.status,
+    submissions = [{"id": str(s.id), "roll_no": db.get(m.Student, s.student_id).roll_no, "name": db.get(m.Student, s.student_id).name,
+                    "filename": s.filename, "status": s.status, "error": s.error} for s in subs]
+    return {"submissions": submissions, "assessment": {"id": str(assessment.id), "title": assessment.title, "status": assessment.status,
                            "is_demo": assessment.is_demo, "subject": assessment.subject.name},
             "documents": docs, "submissions_by_status": by_status, "question_progress": progress,
             "review_queue": queue, "results": totals}
