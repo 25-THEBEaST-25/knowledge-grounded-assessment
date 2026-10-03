@@ -3,6 +3,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.assessments import router as assessments_router
 from backend.app.api.evaluation import router as evaluation_router
 from backend.app.api.handwritten import router as handwritten_router
 from backend.app.api.materials import router as materials_router
@@ -23,6 +24,7 @@ app.add_middleware(
 app.include_router(evaluation_router)
 app.include_router(handwritten_router)
 app.include_router(materials_router)
+app.include_router(assessments_router)
 
 
 @app.get("/")

@@ -32,3 +32,10 @@ pillow>=11.0,<13
 
 # Direct import in ocr_service (also pulled in by paddle).
 numpy==2.4.3
+
+# Assessment module: persistence, migrations, RAG, PDF rendering
+SQLAlchemy==2.0.54
+alembic==1.20.0
+psycopg[binary]==3.3.6
+qdrant-client==1.19.1
+pypdfium2>=4.30

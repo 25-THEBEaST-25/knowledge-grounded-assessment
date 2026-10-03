@@ -222,3 +222,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Assessment module local state
+storage/
+snaptix_dev.db
