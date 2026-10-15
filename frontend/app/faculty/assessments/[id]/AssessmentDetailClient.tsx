@@ -206,7 +206,7 @@ function EvaluatePanel({ assessment, onEvaluated }: { assessment: Assessment; on
     setLoading(true);
     setError(null);
     try {
-      const payload = assessment.questions.map((q) => questionToPayload(q));
+      const payload = assessment.questions.map((q) => questionToPayload(q, assessment.id));
       const res = await evaluateHandwrittenAnswerSheet(file, payload);
 
       const results: QuestionResult[] = res.results.map((r) => ({
@@ -226,6 +226,8 @@ function EvaluatePanel({ assessment, onEvaluated }: { assessment: Assessment; on
         needsReview: r.needs_review,
         answerDetected: r.answer_detected,
         studentAnswer: r.student_answer,
+        criteriaBreakdown: r.criteria_breakdown,
+        evaluationTrace: r.evaluation_trace,
       }));
 
       const submission: Submission = {
@@ -256,7 +258,7 @@ function EvaluatePanel({ assessment, onEvaluated }: { assessment: Assessment; on
     <Card>
       <CardHeader
         title="Upload & evaluate answer sheet"
-        subtitle="Real backend call: PaddleOCR → segmentation → Gemini evaluation"
+        subtitle="Orchestrated evaluation: PaddleOCR → segmentation → dynamic evaluators → deterministic rubric scoring"
       />
       <CardBody className="space-y-4">
         <label className="block">
@@ -297,17 +299,52 @@ function EvaluatePanel({ assessment, onEvaluated }: { assessment: Assessment; on
         {error && <p className="text-sm text-rose-600">{error}</p>}
 
         {lastResult && (
-          <div className="rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-            Evaluated: {lastResult.totalScore}/{lastResult.totalMaxScore} for{" "}
-            {getStudentById(lastResult.studentId)?.name}. See the submissions table below, or the student&apos;s
-            Result Detail page.
+          <div className="space-y-3 rounded-lg bg-emerald-50 p-4 text-sm text-emerald-900 border border-emerald-200">
+            <div className="font-semibold text-emerald-950">
+              Evaluated: {lastResult.totalScore}/{lastResult.totalMaxScore} for{" "}
+              {getStudentById(lastResult.studentId)?.name}.
+            </div>
+            {lastResult.results.map((res) => (
+              <div key={res.questionId} className="rounded border border-emerald-200 bg-white p-3 text-xs space-y-2">
+                <div className="flex justify-between font-medium text-slate-800">
+                  <span>{res.questionId}</span>
+                  <span>{res.score} / {res.maxScore} marks</span>
+                </div>
+                {res.criteriaBreakdown && res.criteriaBreakdown.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    <p className="font-semibold text-slate-600">Deterministic Rubric Breakdown:</p>
+                    {res.criteriaBreakdown.map((c, idx) => (
+                      <div key={idx} className="flex justify-between text-slate-600 bg-slate-50 px-2 py-1 rounded">
+                        <span>{c.criterion_name}</span>
+                        <span className="font-medium text-slate-900">{c.awarded_score} / {c.max_score}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {res.evaluationTrace && (
+                  <details className="mt-2 text-slate-600">
+                    <summary className="cursor-pointer font-medium text-indigo-700 hover:underline">
+                      Audit Trace ({res.evaluationTrace.trace_id})
+                    </summary>
+                    <div className="mt-1 space-y-1 bg-slate-50 p-2 rounded text-[11px]">
+                      <p><span className="font-medium">Evaluators:</span> {res.evaluationTrace.evaluators_run.join(", ")}</p>
+                      {res.evaluationTrace.retrieval_sources.length > 0 && (
+                        <p><span className="font-medium">Sources:</span> {res.evaluationTrace.retrieval_sources.map(s => s.source_file).join(", ")}</p>
+                      )}
+                      {res.evaluationTrace.review_flags.length > 0 && (
+                        <p className="text-amber-700"><span className="font-medium">Review Flags:</span> {res.evaluationTrace.review_flags.join(", ")}</p>
+                      )}
+                    </div>
+                  </details>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
         <p className="text-xs text-slate-500">
           This calls the real <code className="rounded bg-slate-100 px-1 py-0.5">/handwritten/evaluate</code> backend
-          endpoint. It requires the backend to be running and a valid <code>GEMINI_API_KEY</code> configured
-          server-side — if either is missing you&apos;ll see an error here, not a fabricated result.
+          endpoint with Assessment Orchestration, scoped RAG retrieval, and deterministic rubric scoring.
         </p>
       </CardBody>
     </Card>

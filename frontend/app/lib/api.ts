@@ -10,6 +10,40 @@ import type { Question } from "./domain";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+export interface CriterionScoreResult {
+  criterion_name: string;
+  max_score: number;
+  awarded_score: number;
+  attainment_factor: number;
+  reasoning: string;
+  evaluator_name: string;
+  evidence_used: string[];
+  verified_evidence: boolean;
+}
+
+export interface SourceReference {
+  source_file: string;
+  document_type: string;
+  excerpt: string;
+  relevance_score: number;
+  page?: number | null;
+  section?: string | null;
+  question_id?: string | null;
+}
+
+export interface EvaluationTrace {
+  trace_id: string;
+  timestamp: string;
+  question_id: string;
+  routing_reasons: Record<string, string>;
+  evaluators_run: string[];
+  evaluators_failed: string[];
+  retrieval_sources: SourceReference[];
+  criteria_breakdown: CriterionScoreResult[];
+  review_flags: string[];
+  execution_time_ms: number;
+}
+
 export interface PipelineQuestionResult {
   question_id: string;
   student_answer: string;
@@ -30,6 +64,8 @@ export interface PipelineQuestionResult {
   mapping_confidence: number;
   ocr_uncertain: boolean;
   visual_fallback_used: boolean;
+  criteria_breakdown?: CriterionScoreResult[];
+  evaluation_trace?: EvaluationTrace;
 }
 
 export interface PipelineResponse {
@@ -42,6 +78,7 @@ export interface PipelineResponse {
   overall_confidence: number;
   needs_review: boolean;
 }
+
 
 export class ApiError extends Error {
   status: number;
@@ -70,7 +107,9 @@ export interface QuestionPayload {
   question: string;
   model_answer: string;
   rubric: Record<string, unknown>;
+  assessment_id?: string;
 }
+
 
 export async function evaluateHandwrittenAnswerSheet(
   image: File,
@@ -157,7 +196,10 @@ export async function ingestMaterialDocument(
   return res.json();
 }
 
-export function questionToPayload(q: Pick<Question, "id" | "text" | "modelAnswer" | "maxScore" | "criteria">) {
+export function questionToPayload(
+  q: Pick<Question, "id" | "text" | "modelAnswer" | "maxScore" | "criteria">,
+  assessmentId?: string
+): QuestionPayload {
   return {
     question_id: q.id,
     question: q.text,
@@ -166,5 +208,6 @@ export function questionToPayload(q: Pick<Question, "id" | "text" | "modelAnswer
       max_score: q.maxScore,
       criteria: Object.fromEntries(q.criteria.map((c) => [c.name.toLowerCase(), c.maxScore])),
     },
+    assessment_id: assessmentId,
   };
 }

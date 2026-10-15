@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,3 +24,5 @@ class EvaluationResponse(BaseModel):
     feedback: str
 
     confidence: float = Field(ge=0, le=1)
+    criteria_breakdown: Optional[List[dict]] = None
+    evaluation_trace: Optional[dict] = None

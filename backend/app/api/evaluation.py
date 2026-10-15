@@ -38,3 +38,14 @@ def evaluate(request: EvaluationRequest):
             status_code=500,
             detail="Evaluation failed. Please try again later.",
         )
+
+
+@router.get("/trace/{trace_id}")
+
+def get_evaluation_trace(trace_id: str):
+    from backend.app.services.orchestrator_service import get_trace
+
+    trace = get_trace(trace_id)
+    if not trace:
+        raise HTTPException(status_code=404, detail=f"Trace '{trace_id}' not found.")
+    return trace

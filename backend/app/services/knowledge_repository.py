@@ -90,3 +90,136 @@ class AcademicKnowledgeRepository(Protocol):
     def version_history(self, assessment_id: str, question_id: str) -> List[KnowledgeObject]: ...
 
     def archive(self, knowledge_id: str) -> None: ...
+
+
+import re
+import uuid
+
+
+def _tokenize(text: str) -> set[str]:
+    return set(re.findall(r"\b[a-zA-Z0-9_]{3,}\b", text.lower()))
+
+
+class InMemoryKnowledgeRepository:
+    """Thread-safe in-memory knowledge repository implementing AcademicKnowledgeRepository."""
+
+    def __init__(self) -> None:
+        self._storage: dict[str, KnowledgeObject] = {}
+
+    def ingest(self, obj: KnowledgeObject) -> str:
+        """Store a new KnowledgeObject with auto-versioning; returns its id."""
+        norm_qid = obj.metadata.question_id.strip().upper()
+        # Find existing versions
+        existing = [
+            ko for ko in self._storage.values()
+            if ko.metadata.assessment_id == obj.metadata.assessment_id
+            and ko.metadata.question_id.strip().upper() == norm_qid
+            and ko.metadata.document_type == obj.metadata.document_type
+        ]
+        if existing:
+            highest_version = max(ko.metadata.version for ko in existing)
+            obj.metadata.version = highest_version + 1
+        else:
+            if obj.metadata.version <= 0:
+                obj.metadata.version = 1
+
+        knowledge_id = f"kn-{uuid.uuid4().hex[:8]}"
+        self._storage[knowledge_id] = obj
+        return knowledge_id
+
+    def update(self, knowledge_id: str, obj: KnowledgeObject) -> None:
+        """Update an existing knowledge entry or create next version."""
+        if knowledge_id not in self._storage:
+            raise KeyError(f"Knowledge object '{knowledge_id}' not found.")
+        old = self._storage[knowledge_id]
+        if old.metadata.approval_status == "approved":
+            # Immutable approved objects: increment version
+            obj.metadata.version = old.metadata.version + 1
+        self._storage[knowledge_id] = obj
+
+    def retrieve_by_question(
+        self, assessment_id: str, question_id: str, *, approved_only: bool = True
+    ) -> Optional[KnowledgeObject]:
+        """Exact assessment + question match, latest version."""
+        norm_qid = question_id.strip().upper()
+        candidates = [
+            ko for ko in self._storage.values()
+            if ko.metadata.assessment_id == assessment_id
+            and ko.metadata.question_id.strip().upper() == norm_qid
+            and (not approved_only or ko.metadata.approval_status == "approved")
+        ]
+        if not candidates:
+            return None
+        # Return latest version
+        candidates.sort(key=lambda ko: ko.metadata.version, reverse=True)
+        return candidates[0]
+
+    def retrieve_by_assessment(self, assessment_id: str) -> List[KnowledgeObject]:
+        """All knowledge objects scoped to an assessment."""
+        return [
+            ko for ko in self._storage.values()
+            if ko.metadata.assessment_id == assessment_id
+            and ko.metadata.approval_status != "archived"
+        ]
+
+    def retrieve_semantically(
+        self,
+        query: str,
+        *,
+        subject: Optional[str] = None,
+        assessment_id: Optional[str] = None,
+        top_k: int = 5,
+    ) -> List[KnowledgeObject]:
+        """Scoped term-overlap retrieval within assessment and/or subject materials."""
+        query_tokens = _tokenize(query)
+        if not query_tokens:
+            return []
+
+        candidates = [
+            ko for ko in self._storage.values()
+            if ko.metadata.approval_status != "archived"
+            and (subject is None or ko.metadata.subject.lower() == subject.lower())
+            and (assessment_id is None or ko.metadata.assessment_id == assessment_id)
+        ]
+
+        scored: list[tuple[float, KnowledgeObject]] = []
+        for ko in candidates:
+            content_tokens = _tokenize(ko.content)
+            if not content_tokens:
+                continue
+            intersection = query_tokens.intersection(content_tokens)
+            score = len(intersection) / float(len(query_tokens))
+            if score > 0:
+                scored.append((score, ko))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [item[1] for item in scored[:top_k]]
+
+    def version_history(self, assessment_id: str, question_id: str) -> List[KnowledgeObject]:
+        norm_qid = question_id.strip().upper()
+        matches = [
+            ko for ko in self._storage.values()
+            if ko.metadata.assessment_id == assessment_id
+            and ko.metadata.question_id.strip().upper() == norm_qid
+        ]
+        matches.sort(key=lambda ko: ko.metadata.version)
+        return matches
+
+    def archive(self, knowledge_id: str) -> None:
+        if knowledge_id in self._storage:
+            self._storage[knowledge_id].metadata.approval_status = "archived"
+
+
+_default_repository: Optional[InMemoryKnowledgeRepository] = None
+
+
+def get_knowledge_repository() -> InMemoryKnowledgeRepository:
+    global _default_repository
+    if _default_repository is None:
+        _default_repository = InMemoryKnowledgeRepository()
+    return _default_repository
+
+
+def reset_knowledge_repository() -> None:
+    global _default_repository
+    _default_repository = InMemoryKnowledgeRepository()

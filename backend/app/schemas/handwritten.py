@@ -52,6 +52,11 @@ class QuestionSpec(BaseModel):
         gt=0,
         description="Used when the answer is missing; otherwise the evaluator's max_score is used.",
     )
+    assessment_id: Optional[str] = Field(
+        default="default_assessment",
+        description="Assessment ID for scoped knowledge retrieval and audit.",
+    )
+
 
 
 class QuestionResult(EvaluationResponse):
