@@ -176,8 +176,19 @@ def segment_answers(
     preamble: List[str] = []
     buffers: List[List[str]] = []
 
+
     for idx, raw in enumerate(lines):
         marker = match_marker(raw)
+
+        # If the caller supplied expected question IDs, ignore markers
+        # that do not belong to that set. This prevents OCR noise such
+        # as "2.30PM" or unrelated numbered fragments becoming Q2.
+        if marker and normalized_expected:
+            marker_qid = marker[0].lower()
+            expected_ids = {qid.lower() for qid in normalized_expected}
+            if marker_qid not in expected_ids:
+                marker = None
+
         if marker:
             qid, rest = marker
             if current is not None:
@@ -196,6 +207,7 @@ def segment_answers(
             preamble.append(raw)
         else:
             buffers[-1].append(raw)
+
 
     if current is not None:
         current.end_line = len(lines) - 1

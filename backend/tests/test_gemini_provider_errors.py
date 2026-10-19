@@ -206,8 +206,11 @@ def test_evaluate_endpoint_returns_503_not_500_when_gemini_unavailable(monkeypat
         raise evaluation_service.GeminiUnavailableError("AI evaluation is temporarily unavailable.")
 
     import backend.app.api.evaluation as evaluation_api
-
-    monkeypatch.setattr(evaluation_api, "evaluate_answer", raise_unavailable)
+    monkeypatch.setattr(
+     evaluation_api,
+     "evaluate_with_orchestrator",
+     raise_unavailable,
+)
     r = client.post(
         "/evaluation/evaluate",
         json={

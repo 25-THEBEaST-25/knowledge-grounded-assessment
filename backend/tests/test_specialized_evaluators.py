@@ -44,6 +44,48 @@ def test_concept_evaluator_identifies_terms_and_evidence():
     assert out.claims[0].score_factor >= 0.7
 
 
+def test_concept_evaluator_ignores_filler_terms():
+    evaluator = ConceptEvaluator()
+
+    output = evaluator.evaluate(
+        question="What is photosynthesis?",
+        student_answer=(
+            "Photosynthesis uses sunlight, water and carbon dioxide "
+            "to produce glucose and oxygen."
+        ),
+        model_answer=(
+            "Photosynthesis converts light energy into chemical energy, "
+            "producing glucose and oxygen."
+        ),
+        rubric={"max_score": 10},
+    )
+
+    assert output.status == "success"
+    assert "into" not in output.key_terms_missing
+    assert "glucose" in output.key_terms_present
+    assert "oxygen" in output.key_terms_present
+
+def test_concept_evaluator_recognizes_equivalent_photosynthesis_answer():
+    evaluator = ConceptEvaluator()
+
+    output = evaluator.evaluate(
+        question="What is photosynthesis?",
+        student_answer=(
+            "Photosynthesis uses sunlight, water and carbon dioxide "
+            "to produce glucose and oxygen."
+        ),
+        model_answer=(
+            "Photosynthesis converts light energy into chemical energy, "
+            "producing glucose and oxygen."
+        ),
+        rubric={"max_score": 10},
+    )
+
+    assert output.status == "success"
+    assert "glucose" in [t.lower() for t in output.key_terms_present]
+    assert "oxygen" in [t.lower() for t in output.key_terms_present]
+    assert output.claims[0].score_factor >= 0.7
+
 def test_accuracy_math_evaluator_validates_calculations():
     evaluator = AccuracyMathEvaluator()
     out = evaluator.evaluate(

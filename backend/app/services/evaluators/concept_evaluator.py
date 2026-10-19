@@ -17,24 +17,42 @@ from backend.app.services.evaluators.base import extract_verifiable_quotes
 logger = logging.getLogger(__name__)
 
 
+
 def _extract_key_terms(text: str) -> List[str]:
-    """Extract key technical and conceptual nouns/phrases."""
-    # Split on punctuation, filter stopwords
+    """Extract meaningful technical and conceptual terms, excluding filler."""
     stopwords = {
-        "the", "a", "an", "is", "are", "was", "were", "and", "or", "in", "on", "at",
-        "to", "for", "with", "by", "from", "that", "this", "which", "as", "it", "its",
-        "of", "be", "been", "have", "has", "had", "do", "does", "did", "can", "could",
+        "the", "a", "an", "is", "are", "was", "were", "and", "or", "in",
+        "on", "at", "to", "for", "with", "by", "from", "that", "this",
+        "which", "as", "it", "its", "of", "be", "been", "have", "has",
+        "had", "do", "does", "did", "can", "could", "into", "their",
+        "they", "them", "then", "than", "also", "using", "used",
     }
-    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_\-]{2,}\b", text.lower())
+
+    words = re.findall(r"\b[a-zA-Z][a-zA-Z0-9_-]{2,}\b", text.lower())
     meaningful = [w for w in words if w not in stopwords and len(w) > 3]
-    # Unique preserving order
+
+    # Normalise a few common word forms.
+    normalisations = {
+        "converts": "convert",
+        "converted": "convert",
+        "converting": "convert",
+        "produces": "produce",
+        "producing": "produce",
+        "uses": "use",
+        "using": "use",
+    }
+
+    result: List[str] = []
     seen = set()
-    result = []
-    for w in meaningful:
-        if w not in seen:
-            seen.add(w)
-            result.append(w)
+
+    for word in meaningful:
+        term = normalisations.get(word, word)
+        if term not in seen:
+            seen.add(term)
+            result.append(term)
+
     return result
+
 
 
 class ConceptEvaluator:
