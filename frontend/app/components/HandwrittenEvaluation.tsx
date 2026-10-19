@@ -301,6 +301,34 @@ export default function HandwrittenEvaluation() {
                     <SubScore label="Terminology" value={r.technical_terminology_score} />
                   </div>
 
+                  {r.criteria_breakdown && r.criteria_breakdown.length > 0 && (
+                    <div className="rounded-lg border border-slate-100 bg-slate-50/80 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-slate-700">Deterministic Rubric Criteria Breakdown</p>
+                      <div className="space-y-1.5">
+                        {r.criteria_breakdown.map((c, idx) => (
+                          <div key={idx} className="rounded border border-slate-200 bg-white p-2 text-xs">
+                            <div className="flex items-center justify-between font-medium text-slate-800">
+                              <span>{c.criterion_name}</span>
+                              <span className="font-semibold text-indigo-700">
+                                {c.awarded_score} / {c.max_score} marks
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-slate-600">{c.reasoning}</p>
+                            {c.evidence_used && c.evidence_used.length > 0 && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {c.evidence_used.map((ev, evIdx) => (
+                                  <span key={evIdx} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700 border border-emerald-200">
+                                    Verified Quote: &ldquo;{ev}&rdquo;
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-sm font-medium text-slate-800">{r.feedback}</p>
                   {r.strengths.length > 0 && (
                     <p className="text-sm text-slate-700">
@@ -314,6 +342,48 @@ export default function HandwrittenEvaluation() {
                       {r.missing_concepts.join("; ")}
                     </p>
                   )}
+
+                  {r.evaluation_trace && (
+                    <details className="rounded-lg border border-slate-200 bg-slate-50">
+                      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold text-slate-700 hover:text-indigo-600">
+                        Orchestration Audit Trace ({r.evaluation_trace.trace_id} · {r.evaluation_trace.execution_time_ms}ms)
+                      </summary>
+                      <div className="border-t border-slate-200 bg-white p-3 text-xs space-y-2">
+                        <div>
+                          <span className="font-semibold text-slate-700">Evaluators Routed: </span>
+                          <span className="text-slate-600">{r.evaluation_trace.evaluators_run.join(", ")}</span>
+                        </div>
+                        {Object.entries(r.evaluation_trace.routing_reasons).length > 0 && (
+                          <div className="space-y-0.5">
+                            <span className="font-semibold text-slate-700">Routing Reasons:</span>
+                            {Object.entries(r.evaluation_trace.routing_reasons).map(([ev, reason]) => (
+                              <p key={ev} className="text-slate-600 pl-2">
+                                &bull; <strong className="text-slate-700">{ev}:</strong> {reason}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                        {r.evaluation_trace.retrieval_sources.length > 0 && (
+                          <div className="space-y-1">
+                            <span className="font-semibold text-slate-700">Faculty Grounding Sources (Scoped RAG):</span>
+                            {r.evaluation_trace.retrieval_sources.map((src, sIdx) => (
+                              <div key={sIdx} className="rounded bg-slate-50 p-1.5 text-[11px] border border-slate-100">
+                                <span className="font-medium text-slate-800">{src.source_file}</span> ({src.document_type}) · Relevance {(src.relevance_score * 100).toFixed(0)}%
+                                <p className="text-slate-500 italic mt-0.5">&ldquo;{src.excerpt}&rdquo;</p>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {r.evaluation_trace.review_flags.length > 0 && (
+                          <div>
+                            <span className="font-semibold text-amber-800">Audit & Review Flags: </span>
+                            <span className="text-amber-700">{r.evaluation_trace.review_flags.join(", ")}</span>
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  )}
+
                   {r.student_answer && (
                     <details>
                       <summary className="cursor-pointer text-xs font-semibold text-slate-600">
@@ -324,6 +394,7 @@ export default function HandwrittenEvaluation() {
                       </pre>
                     </details>
                   )}
+
                 </div>
               );
             })}

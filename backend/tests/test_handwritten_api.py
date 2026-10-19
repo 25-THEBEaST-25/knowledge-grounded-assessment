@@ -96,20 +96,65 @@ def test_existing_evaluation_route_preserved():
     assert {"/handwritten/ocr", "/handwritten/segment", "/handwritten/evaluate"} <= set(paths)
 
 
-def test_evaluation_evaluate_endpoint():
+
+def test_evaluation_evaluate_endpoint(monkeypatch):
+    from backend.app.api import evaluation as evaluation_api
+
+    fake_result = {
+        "score": 7,
+        "max_score": 10,
+        "concept_score": 3,
+        "accuracy_score": 2,
+        "precision_score": 1,
+        "technical_terminology_score": 1,
+        "strengths": ["Correctly explained photosynthesis"],
+        "missing_concepts": [],
+        "feedback": "Good answer",
+        "confidence": 0.9,
+        "needs_review": False,
+        "criteria_breakdown": {},
+        "evaluation_trace": {
+            "trace_id": "tr-test123",
+            "question_id": "demo-question",
+            "routing_reasons": [],
+            "evaluators_run": [],
+            "evaluators_failed": [],
+            "retrieval_sources": [],
+            "criteria_breakdown": {},
+            "review_flags": [],
+            "execution_time_ms": 1.0,
+        },
+    }
+
+    calls = []
+
+    def fake_orchestrator(**kwargs):
+        calls.append(kwargs)
+        return fake_result
+
+    monkeypatch.setattr(
+        evaluation_api,
+        "evaluate_with_orchestrator",
+        fake_orchestrator,
+    )
+
     payload = {
         "question": "What is photosynthesis?",
         "student_answer": "Process by which plants convert sunlight to chemical energy",
         "model_answer": "Process converting solar energy into sugars",
         "rubric": {"max_score": 10},
     }
-    r = client.post("/evaluation/evaluate", json=payload)
-    assert r.status_code == 200
-    data = r.json()
+
+    response = client.post("/evaluation/evaluate", json=payload)
+
+    assert response.status_code == 200, response.text
+    data = response.json()
     assert data["score"] == 7
     assert data["max_score"] == 10
-    assert "strengths" in data
-    assert "feedback" in data
+    assert data["criteria_breakdown"] == {}
+    assert data["evaluation_trace"]["trace_id"] == "tr-test123"
+    assert len(calls) == 1
+    assert calls[0]["question"] == payload["question"]
 
 
 

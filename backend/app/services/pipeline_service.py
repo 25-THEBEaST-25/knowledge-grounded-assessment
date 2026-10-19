@@ -84,9 +84,12 @@ def deduplicate_questions(questions: Sequence[QuestionSpec]) -> List[QuestionSpe
                     model_answer=q.model_answer,
                     rubric=rubric,
                     max_score=q.max_score,
+                    assessment_id=getattr(q, "assessment_id", "default_assessment"),
                 )
             )
     return deduped
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +218,13 @@ def _evaluator_accepts_evidence(evaluator: Evaluator) -> bool:
 
 def _missing_answer_result(spec: QuestionSpec, ocr_conf: float) -> QuestionResult:
     max_score = spec.max_score or evaluation_service.extract_authoritative_max_score(spec.rubric)
+    from backend.app.services.rubric_scoring_service import score_rubric_deterministically
+    criteria_results, _, _ = score_rubric_deterministically(
+        rubric=spec.rubric,
+        student_answer="",
+        evaluator_outputs={},
+        explicit_max_score=float(max_score),
+    )
     return QuestionResult(
         question_id=spec.question_id,
         student_answer="",
@@ -235,7 +245,10 @@ def _missing_answer_result(spec: QuestionSpec, ocr_conf: float) -> QuestionResul
         mapping_confidence=0.0,
         ocr_uncertain=True,
         visual_fallback_used=False,
+        criteria_breakdown=[c.model_dump() for c in criteria_results],
+        evaluation_trace=None,
     )
+
 
 
 def evaluate_segments(
@@ -319,6 +332,34 @@ def evaluate_segments(
         ev_conf = _clamp01(raw.get("confidence", 0.0))
         combined = combine_confidence(ev_conf, seg_ocr_confidence)
 
+        # Enrich with deterministic rubric scoring and evaluation trace
+        if "criteria_breakdown" not in raw or "evaluation_trace" not in raw:
+            from backend.app.services.orchestrator_service import evaluate_with_orchestrator
+            from backend.app.services.retrieval_service import register_approved_question_material
+
+            as_id = getattr(spec, "assessment_id", "default_assessment") or "default_assessment"
+            register_approved_question_material(
+                assessment_id=as_id,
+                question_id=norm_qid,
+                model_answer=spec.model_answer,
+                rubric=rubric,
+                question_text=spec.question,
+            )
+            orch_res = evaluate_with_orchestrator(
+                assessment_id=as_id,
+                question_id=norm_qid,
+                question=spec.question,
+                student_answer=seg.text,
+                model_answer=spec.model_answer,
+                rubric=rubric,
+                image_bytes=image_bytes,
+                ocr_confidence=seg_ocr_confidence,
+                mapping_confidence=mapping_confidence,
+                max_score=float(authoritative_max),
+            )
+            raw.setdefault("criteria_breakdown", orch_res["criteria_breakdown"])
+            raw.setdefault("evaluation_trace", orch_res["evaluation_trace"])
+
         return QuestionResult(
             question_id=norm_qid,
             student_answer=seg.text,
@@ -331,6 +372,7 @@ def evaluate_segments(
             visual_fallback_used=visual_fallback_used,
             **raw,
         )
+
 
     max_workers = _max_evaluation_concurrency()
     if max_workers <= 1 or len(deduped_questions) <= 1:

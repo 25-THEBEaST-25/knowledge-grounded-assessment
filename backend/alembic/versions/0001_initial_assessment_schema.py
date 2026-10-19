@@ -1,11 +1,10 @@
 """initial assessment schema
 
 Revision ID: 0001
-Revises: 
+Revises:
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects import postgresql
 
 revision = '0001'

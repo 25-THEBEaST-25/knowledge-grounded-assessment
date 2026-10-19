@@ -68,6 +68,40 @@ export interface Assessment {
   source: DataSource;
 }
 
+export interface CriterionScoreResult {
+  criterion_name: string;
+  max_score: number;
+  awarded_score: number;
+  attainment_factor: number;
+  reasoning: string;
+  evaluator_name: string;
+  evidence_used: string[];
+  verified_evidence: boolean;
+}
+
+export interface SourceReference {
+  source_file: string;
+  document_type: string;
+  excerpt: string;
+  relevance_score: number;
+  page?: number | null;
+  section?: string | null;
+  question_id?: string | null;
+}
+
+export interface EvaluationTrace {
+  trace_id: string;
+  timestamp: string;
+  question_id: string;
+  routing_reasons: Record<string, string>;
+  evaluators_run: string[];
+  evaluators_failed: string[];
+  retrieval_sources: SourceReference[];
+  criteria_breakdown: CriterionScoreResult[];
+  review_flags: string[];
+  execution_time_ms: number;
+}
+
 export interface QuestionResult {
   questionId: string;
   score: number;
@@ -85,7 +119,10 @@ export interface QuestionResult {
   needsReview: boolean;
   answerDetected: boolean;
   studentAnswer: string;
+  criteriaBreakdown?: CriterionScoreResult[];
+  evaluationTrace?: EvaluationTrace;
 }
+
 
 export type SubmissionStatus = "pending" | "evaluated";
 

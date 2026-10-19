@@ -118,6 +118,32 @@ export default function StudentResultDetailPage({ params }: { params: Promise<{ 
                   </div>
                 </div>
 
+                {r.criteriaBreakdown && r.criteriaBreakdown.length > 0 && (
+                  <div>
+                    <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Rubric Criteria Breakdown</p>
+                    <div className="space-y-1.5">
+                      {r.criteriaBreakdown.map((c, cIdx) => (
+                        <div key={cIdx} className="rounded-lg border border-slate-200 bg-slate-50 p-2.5 text-sm">
+                          <div className="flex justify-between font-medium text-slate-800">
+                            <span>{c.criterion_name}</span>
+                            <span className="font-bold text-indigo-700">{c.awarded_score} / {c.max_score} marks</span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-600">{c.reasoning}</p>
+                          {c.evidence_used && c.evidence_used.length > 0 && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {c.evidence_used.map((ev, evIdx) => (
+                                <span key={evIdx} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-700 border border-emerald-200">
+                                  Verified Evidence: &ldquo;{ev}&rdquo;
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {r.strengths.length > 0 && (
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Strengths</p>
@@ -136,6 +162,7 @@ export default function StudentResultDetailPage({ params }: { params: Promise<{ 
                 </div>
               </CardBody>
             </Card>
+
           );
         })}
       </div>
