@@ -1,3 +1,4 @@
+![CI](https://github.com/25-THEBEaST-25/knowledge-grounded-assessment/actions/workflows/ci.yml/badge.svg)
 ![Python](https://img.shields.io/badge/Python-3.13-blue)
 ![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688)
 ![Next.js](https://img.shields.io/badge/Next.js-Frontend-black)
@@ -81,6 +82,13 @@ images or extracted-document text.
 
 ---
 
+## Assessment workflow (live backend)
+
+A database-backed, RAG-grounded, faculty-reviewed assessment flow lives under `/faculty/workflow`. See
+[docs/assessment-workflow.md](docs/assessment-workflow.md) for setup, the demo script, tables and limitations.
+
+---
+
 ## Architecture
 
 ```
@@ -101,7 +109,7 @@ backend/   FastAPI + PaddleOCR + google-genai (Gemini)
   app/services/   ocr_service, segmentation_service, pipeline_service,
                   evaluation_service, ingestion_service,
                   knowledge_repository (documented, unimplemented interface)
-  tests/          102 tests — segmentation, score integrity, prompt
+  tests/          140 tests — segmentation, score integrity, prompt
                   injection, image safety, OCR preprocessing/caching,
                   OCR uncertainty + visual fallback, bounded concurrency,
                   Gemini provider-failure handling, document ingestion,
@@ -167,13 +175,17 @@ Open http://localhost:3000 — you'll land on a Faculty/Student portal picker. S
 
 ```bash
 # Backend — from repo root; PaddleOCR and Gemini are faked, no key needed
-pip install pytest httpx
-pytest                          # 102 tests
+pip install -r backend/requirements-dev.txt   # or: pip install pytest httpx
+pytest                          # 140 tests
 
 # Frontend — from frontend/
 npm run lint
 npm run build
 ```
+
+CI (`.github/workflows/ci.yml`) runs the backend suite on Python 3.13 and the frontend
+lint + build on every push and PR to `main`. It skips installing PaddleOCR/PaddlePaddle
+(~1 GB) because the tests fake the OCR engine; everything else is installed for real.
 
 ---
 

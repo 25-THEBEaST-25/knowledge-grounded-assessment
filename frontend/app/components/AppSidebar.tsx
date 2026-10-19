@@ -28,6 +28,7 @@ interface NavItem {
 const FACULTY_NAV: NavItem[] = [
   { label: "Dashboard", href: "/faculty", icon: LayoutDashboard },
   { label: "Assessments", href: "/faculty/assessments", icon: ClipboardList },
+  { label: "Workflow (Live)", href: "/faculty/workflow", icon: Sparkles },
   { label: "Answer Evaluation", href: "/faculty/evaluate", icon: ScanText },
   { label: "Students", href: "/faculty/students", icon: Users },
   { label: "Analytics", href: "/faculty/analytics", icon: BarChart3 },
@@ -38,6 +39,7 @@ const FACULTY_NAV: NavItem[] = [
 const STUDENT_NAV: NavItem[] = [
   { label: "Dashboard", href: "/student", icon: LayoutDashboard },
   { label: "My Assessments", href: "/student/assessments", icon: ClipboardList },
+  { label: "Live Results", href: "/student/workflow", icon: Sparkles },
   { label: "My Results", href: "/student/results", icon: BookOpen },
   { label: "AI Feedback", href: "/student/feedback", icon: Sparkles },
   { label: "Learning Gaps", href: "/student/learning-gaps", icon: Target },
