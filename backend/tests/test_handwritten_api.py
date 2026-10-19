@@ -112,7 +112,7 @@ def test_evaluation_evaluate_endpoint(monkeypatch):
         "feedback": "Good answer",
         "confidence": 0.9,
         "needs_review": False,
-        "criteria_breakdown": [],
+        "criteria_breakdown": {},
         "evaluation_trace": {
             "trace_id": "tr-test123",
             "question_id": "demo-question",
@@ -120,7 +120,7 @@ def test_evaluation_evaluate_endpoint(monkeypatch):
             "evaluators_run": [],
             "evaluators_failed": [],
             "retrieval_sources": [],
-            "criteria_breakdown": [],
+            "criteria_breakdown": {},
             "review_flags": [],
             "execution_time_ms": 1.0,
         },
@@ -151,7 +151,7 @@ def test_evaluation_evaluate_endpoint(monkeypatch):
     data = response.json()
     assert data["score"] == 7
     assert data["max_score"] == 10
-    assert data["criteria_breakdown"] == []
+    assert data["criteria_breakdown"] == {}
     assert data["evaluation_trace"]["trace_id"] == "tr-test123"
     assert len(calls) == 1
     assert calls[0]["question"] == payload["question"]

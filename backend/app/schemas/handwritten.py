@@ -1,3 +1,4 @@
+
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -31,7 +32,10 @@ class SegmentOut(BaseModel):
     marker_line: Optional[str] = None
     detected: bool = True
     mapping_confidence: float = Field(
-        default=1.0, ge=0, le=1, description="How sure segmentation is this text belongs to this question_id."
+        default=1.0,
+        ge=0,
+        le=1,
+        description="How sure segmentation is that this text belongs to this question.",
     )
 
 
@@ -58,7 +62,6 @@ class QuestionSpec(BaseModel):
     )
 
 
-
 class QuestionResult(EvaluationResponse):
     question_id: str
     student_answer: str
@@ -66,14 +69,26 @@ class QuestionResult(EvaluationResponse):
     ocr_confidence: float = Field(ge=0, le=1)
     combined_confidence: float = Field(ge=0, le=1)
     needs_review: bool
+    criteria_breakdown: Optional[List[dict] | dict] = None
     mapping_confidence: float = Field(
-        default=1.0, ge=0, le=1, description="How sure segmentation is this answer belongs to this question."
+        default=1.0,
+        ge=0,
+        le=1,
+        description="How sure segmentation is that this answer belongs to this question.",
     )
     ocr_uncertain: bool = Field(
-        default=False, description="True if OCR confidence, mapping confidence, or answer length looked suspicious."
+        default=False,
+        description=(
+            "True if OCR confidence, mapping confidence, "
+            "or answer length looked suspicious."
+        ),
     )
     visual_fallback_used: bool = Field(
-        default=False, description="True if the answer-region image (not just OCR text) was sent to the evaluator."
+        default=False,
+        description=(
+            "True if the answer-region image (not just OCR text) "
+            "was sent to the evaluator."
+        ),
     )
 
 
