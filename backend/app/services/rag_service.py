@@ -126,10 +126,15 @@ def collect_chunks(db, assessment: m.Assessment, read_text: Callable[[m.Document
             if sq.rubric and sq.rubric.approved:
                 text = "; ".join(f"{c.code}: {c.description} ({c.max_marks:g})" for c in sq.rubric.criteria)
                 out.append(ChunkRecord(f"Rubric {sq.full_id}: {text}", "rubric", sq.full_id, None, f"rubric {sq.full_id}"))
-    for doc in db.query(m.Document).filter_by(assessment_id=assessment.id, kind="reference", approved=True):
+    for doc in db.query(m.Document).filter(
+        m.Document.assessment_id == assessment.id,
+        m.Document.kind.in_(["reference", "notes", "lecture_notes", "pyq"]),
+        m.Document.approved == True,
+    ):
         for c in chunk_text(read_text(doc)):
-            out.append(ChunkRecord(c, "reference", GLOBAL_SCOPE, str(doc.id), doc.filename, doc.version))
+            out.append(ChunkRecord(c, doc.kind, GLOBAL_SCOPE, str(doc.id), doc.filename, doc.version))
     return out
+
 
 
 def index_assessment(db, assessment: m.Assessment, rag: Optional[RAG], read_text: Callable[[m.Document], str]) -> Dict:

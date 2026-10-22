@@ -80,6 +80,18 @@ class CriterionScoreResult(BaseModel):
     evidence_used: List[str] = Field(default_factory=list)
     verified_evidence: bool = True
 
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
 
 class EvaluationTrace(BaseModel):
     """Auditable trace of the complete evaluation execution."""
@@ -94,6 +106,20 @@ class EvaluationTrace(BaseModel):
     criteria_breakdown: List[CriterionScoreResult] = Field(default_factory=list)
     review_flags: List[str] = Field(default_factory=list)
     execution_time_ms: float = 0.0
+
+    def __getitem__(self, key: str) -> Any:
+        try:
+            return getattr(self, key)
+        except AttributeError:
+            raise KeyError(key)
+
+    def __contains__(self, key: str) -> bool:
+        return hasattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key, default)
+
+
 
 
 class OrchestrationResult(BaseModel):

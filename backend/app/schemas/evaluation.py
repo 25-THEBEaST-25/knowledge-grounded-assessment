@@ -1,7 +1,9 @@
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
+
+from backend.app.schemas.evaluator_contracts import CriterionScoreResult, EvaluationTrace
 
 
 class EvaluationRequest(BaseModel):
@@ -27,7 +29,14 @@ class EvaluationResponse(BaseModel):
     feedback: str = ""
 
     confidence: float = Field(default=0, ge=0, le=1)
+    combined_confidence: Optional[float] = None
+    ocr_confidence: Optional[float] = None
+    mapping_confidence: Optional[float] = None
     needs_review: bool = False
+    ocr_uncertain: Optional[bool] = False
+    visual_fallback_used: Optional[bool] = False
 
-    criteria_breakdown: Optional[dict] = None
-    evaluation_trace: Optional[dict] = None
+    criteria_breakdown: Optional[Union[List[CriterionScoreResult], List[Dict[str, Any]], Dict[str, Any]]] = None
+    evaluation_trace: Optional[Union[Dict[str, Any], EvaluationTrace]] = None
+
+

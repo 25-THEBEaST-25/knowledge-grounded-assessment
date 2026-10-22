@@ -14,8 +14,10 @@ const KINDS: [string, string][] = [
   ["question_paper", "Question paper"],
   ["model_answer", "Model answers"],
   ["rubric", "Marking scheme / rubric"],
-  ["reference", "Reference notes (optional)"],
+  ["notes", "Lecture notes / study material"],
+  ["pyq", "Previous-year questions (PYQ)"],
 ];
+
 const ACTIVE = ["PROCESSING", "EVALUATING"];
 
 function ItemEditor({ id, item, onSaved }: { id: string; item: Item; onSaved: () => void }) {

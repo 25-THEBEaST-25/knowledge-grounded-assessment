@@ -129,26 +129,81 @@ def process_submission(db: Session, submission_id, *, ocr_fn: Callable[[bytes], 
     return {"status": "EXTRACTED", "responses": len(subqs), "ocr_confidence": sub.ocr_confidence}
 
 
+
 def correct_response_text(db: Session, response_id, text: str, actor: str) -> m.StudentResponse:
-    """Review path for uncertain OCR: faculty fixes the extracted text (original OCR kept in audit log)."""
+    """Review path for uncertain OCR: faculty fixes extracted text; original OCR is kept in the audit log."""
     r = db.get(m.StudentResponse, response_id)
     if r is None:
         raise SubmissionError("response not found")
-    audit.log(db, actor, "response.text_corrected", "student_response", r.id, {"previous_text": r.text})
-    r.text, r.extraction_edited, r.detected = text, True, bool(text.strip())
-    plan = db.query(m.EvaluationPlan).filter_by(response_id=r.id, superseded=False).first()
+
+    audit.log(
+        db,
+        actor,
+        "response.text_corrected",
+        "student_response",
+        r.id,
+        {"previous_text": r.text},
+    )
+    r.text = text
+    r.extraction_edited = True
+    r.detected = bool(text.strip())
+
+    submission = db.get(m.Submission, r.submission_id)
+    if submission is not None:
+        submission.ocr_review_confirmed = False
+
+    plan = db.query(m.EvaluationPlan).filter_by(
+        response_id=r.id, superseded=False
+    ).first()
     if plan:
-        plan.status = "PENDING"  # content changed: next evaluate call must re-run
+        plan.status = "PENDING"  # Changed text must be evaluated again.
+
     return r
 
 
+
+
+
+def confirm_ocr_review(db: Session, submission_id, actor: str) -> m.Submission:
+    """Record faculty confirmation that all extracted answers were reviewed."""
+    sub = db.get(m.Submission, submission_id)
+    if sub is None:
+        raise SubmissionError("Submission not found.")
+    if sub.status not in ("EXTRACTED", "NEEDS_REVIEW", "EVALUATED"):
+        raise SubmissionError("Submission must be extracted before OCR review can be confirmed.")
+
+    responses = db.query(m.StudentResponse).filter_by(
+        submission_id=sub.id
+    ).all()
+    if not responses:
+        raise SubmissionError("No extracted answers are available to review.")
+
+    sub.ocr_review_confirmed = True
+    audit.log(
+        db,
+        actor,
+        "submission.ocr_review_confirmed",
+        "submission",
+        sub.id,
+        {"responses_reviewed": len(responses)},
+    )
+    return sub
+
 def evaluate_submission(session_factory, submission_id, *, llm=None, force: bool = False, actor: str = "system") -> Dict:
     """Evaluate every response, committing per response so one failure never loses the rest."""
+  
     with session_factory() as db:
         sub = db.get(m.Submission, submission_id)
+        if sub is None:
+            raise SubmissionError("Submission not found.")
         if sub.status in ("UPLOADED", "PROCESSING", "FAILED"):
             raise SubmissionError("Submission has not been extracted yet.")
+        if not sub.ocr_review_confirmed:
+            raise SubmissionError(
+                "Faculty must review and confirm the extracted answers before evaluation."
+            )
         sub.status = "EVALUATING"
+
         db.commit()
         ids = [r.id for r in db.query(m.StudentResponse).filter_by(submission_id=submission_id)]
     outcome = {"evaluated": 0, "blocked": 0, "failed": 0, "skipped": 0}

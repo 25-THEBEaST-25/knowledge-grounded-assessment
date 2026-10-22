@@ -208,8 +208,24 @@ export async function evaluateHandwrittenAnswerSheet(
 }
 
 // ---------------------------------------------------------------------------
-// Faculty material ingestion (B1/B2) -- the other real backend integration.
+// Faculty material ingestion & approval -- real backend integration.
 // ---------------------------------------------------------------------------
+
+export type MaterialKind =
+  | "question_paper"
+  | "model_answer"
+  | "rubric"
+  | "notes"
+  | "lecture_notes"
+  | "reference"
+  | "pyq";
+
+export interface RubricCriterionOut {
+  code?: string | null;
+  description: string;
+  max_marks: number;
+  partial_credit?: boolean;
+}
 
 export interface IngestedQuestion {
   question_id: string;
@@ -225,6 +241,59 @@ export interface MaterialIngestionResponse {
   questions: IngestedQuestion[];
   raw_text_preview: string;
   extraction_engine: string;
+  document_type?: string;
+  rubric_criteria?: Record<string, RubricCriterionOut[]> | null;
+  sections_preview?: string[] | null;
+  status?: string;
+  filename?: string | null;
+  size_bytes?: number | null;
+}
+
+export interface MaterialApprovalPayload {
+  assessment_id: string;
+  document_type: string;
+  filename: string;
+  content?: string;
+  questions?: IngestedQuestion[];
+  rubric_criteria?: Record<string, RubricCriterionOut[]>;
+  subject?: string;
+  actor?: string;
+}
+
+export interface MaterialApprovalResponse {
+  status: string;
+  assessment_id: string;
+  document_type: string;
+  indexed_chunks: number;
+  knowledge_ids: string[];
+  message: string;
+}
+
+export interface MaterialStatusResponse {
+  assessment_id: string;
+  total_approved_knowledge_objects: number;
+  materials_by_type: Record<
+    string,
+    {
+      question_id: string;
+      source_file: string;
+      version: number;
+      approval_status: string;
+      created_at: string;
+      content_preview: string;
+    }[]
+  >;
+}
+
+export interface MaterialTypesResponse {
+  supported_kinds: {
+    kind: string;
+    label: string;
+    description: string;
+  }[];
+  supported_extensions: string[];
+  max_upload_bytes: number;
+  max_upload_mb: number;
 }
 
 function friendlyIngestionMessage(
@@ -251,11 +320,15 @@ function friendlyIngestionMessage(
 
 export async function ingestMaterialDocument(
   file: File,
-  kind: "question_paper" | "model_answer",
+  kind: MaterialKind,
+  assessmentId?: string,
 ): Promise<MaterialIngestionResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("kind", kind);
+  if (assessmentId) {
+    form.append("assessment_id", assessmentId);
+  }
 
   let res: Response;
 
@@ -292,6 +365,64 @@ export async function ingestMaterialDocument(
 
   return (await res.json()) as MaterialIngestionResponse;
 }
+
+export async function approveMaterial(
+  payload: MaterialApprovalPayload,
+): Promise<MaterialApprovalResponse> {
+  let res: Response;
+
+  try {
+    res = await fetch(`${API_URL}/materials/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    throw new ApiError(0, "Could not reach the backend API.");
+  }
+
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const b = await res.json();
+      detail = typeof b.detail === "string" ? b.detail : JSON.stringify(b.detail);
+    } catch {
+      detail = res.statusText;
+    }
+    throw new ApiError(res.status, detail || "Approval failed.");
+  }
+
+  return (await res.json()) as MaterialApprovalResponse;
+}
+
+export async function getAssessmentMaterialsStatus(
+  assessmentId: string,
+): Promise<MaterialStatusResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/materials/status/${assessmentId}`);
+  } catch {
+    throw new ApiError(0, "Could not reach the backend API.");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, "Failed to load materials status.");
+  }
+  return (await res.json()) as MaterialStatusResponse;
+}
+
+export async function getMaterialTypes(): Promise<MaterialTypesResponse> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}/materials/types`);
+  } catch {
+    throw new ApiError(0, "Could not reach the backend API.");
+  }
+  if (!res.ok) {
+    throw new ApiError(res.status, "Failed to load supported material types.");
+  }
+  return (await res.json()) as MaterialTypesResponse;
+}
+
 
 export function questionToPayload(
   q: Pick<

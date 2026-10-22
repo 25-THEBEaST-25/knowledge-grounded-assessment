@@ -80,6 +80,31 @@ def register_approved_question_material(
         repo.ingest(KnowledgeObject(metadata=meta_qp, content=question_text.strip()))
 
 
+def register_approved_reference_material(
+    assessment_id: str,
+    content: str,
+    source_file: str,
+    document_type: str = "notes",  # "notes" | "lecture_notes" | "reference" | "pyq"
+    subject: str = "General",
+    repository: Optional[AcademicKnowledgeRepository] = None,
+) -> str:
+    """Store approved lecture notes, study materials, or PYQ chunks in the repository."""
+    repo = repository or get_knowledge_repository()
+    if not content.strip():
+        return ""
+    meta = KnowledgeMetadata(
+        subject=subject,
+        assessment_id=assessment_id,
+        semester="",
+        academic_year="",
+        question_id="GLOBAL",
+        document_type=document_type,
+        source_file=source_file,
+        approval_status="approved",
+    )
+    return repo.ingest(KnowledgeObject(metadata=meta, content=content.strip()))
+
+
 def index_material_document(
     assessment_id: str,
     filename: str,
@@ -94,6 +119,17 @@ def index_material_document(
     """
     repo = repository or get_knowledge_repository()
     result = ingest_document(filename, content, kind)
+
+    if kind in ("reference", "notes", "lecture_notes"):
+        register_approved_reference_material(
+            assessment_id=assessment_id,
+            content=result.raw_text_preview,
+            source_file=filename,
+            document_type=kind,
+            subject=subject,
+            repository=repo,
+        )
+        return result.questions
 
     for q in result.questions:
         norm_qid = normalize_question_id(q.question_id)

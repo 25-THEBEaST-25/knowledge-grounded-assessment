@@ -7,7 +7,7 @@ from backend.app.schemas.evaluation import (
     EvaluationRequest,
     EvaluationResponse,
 )
-from backend.app.services.orchestrator_service import evaluate_with_orchestrator
+from backend.app.services.orchestrator_service import evaluate_with_orchestrator, get_trace
 from backend.app.services.evaluation_service import (
     GeminiUnavailableError,
     evaluate_answer,

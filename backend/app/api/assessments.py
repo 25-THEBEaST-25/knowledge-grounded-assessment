@@ -142,20 +142,37 @@ async def upload_submission(assessment_id: str, roll_no: str = Form(...), studen
     return out
 
 
-def _bg_process_and_evaluate(submission_id, actor: str, do_eval: bool, force: bool) -> None:
+
+def _bg_process_and_evaluate(
+    submission_id, actor: str, do_eval: bool, force: bool
+) -> None:
     try:
         with new_session() as db:
-            subs.process_submission(db, submission_id, force=force, actor=actor)
+            subs.process_submission(
+                db, submission_id, force=force, actor=actor
+            )
             db.commit()
             status = db.get(m.Submission, submission_id).status
+
+        # OCR extraction must stop for mandatory faculty review.
+        # Evaluation happens through the separate /evaluate endpoint
+        # after the faculty confirms the extracted answers.
         if do_eval and status == "EXTRACTED":
-            subs.evaluate_submission(new_session, submission_id, force=force, actor=actor)
+            logger.info(
+                "Submission %s is awaiting faculty OCR review; "
+                "automatic evaluation was intentionally deferred.",
+                submission_id,
+            )
+
     except Exception:
-        logger.exception("Background processing failed for %s", submission_id)
+        logger.exception(
+            "Background processing failed for %s", submission_id
+        )
         with new_session() as db:
             s = db.get(m.Submission, submission_id)
-            if s:
-                s.status, s.error = "FAILED", "Processing failed unexpectedly; retry."
+            if s and s.status == "PROCESSING":
+                s.status = "FAILED"
+                s.error = "Processing failed unexpectedly; retry."
                 db.commit()
 
 

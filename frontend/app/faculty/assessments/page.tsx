@@ -413,25 +413,41 @@ function CreateAssessmentForm({ onCancel, onCreated }: { onCancel: () => void; o
 function MaterialsIntake({ onExtracted }: { onExtracted: (questions: DraftQuestion[]) => void }) {
   const [questionPaperFile, setQuestionPaperFile] = useState<File | null>(null);
   const [modelAnswerFile, setModelAnswerFile] = useState<File | null>(null);
+  const [rubricFile, setRubricFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
 
   const extract = async () => {
-    if (!modelAnswerFile && !questionPaperFile) return;
+    if (!modelAnswerFile && !questionPaperFile && !rubricFile) return;
     setLoading(true);
     setError(null);
     setSummary(null);
     try {
-      const [qp, ma] = await Promise.all([
+      const [qp, ma, rb] = await Promise.all([
         questionPaperFile ? ingestMaterialDocument(questionPaperFile, "question_paper") : Promise.resolve(null),
         modelAnswerFile ? ingestMaterialDocument(modelAnswerFile, "model_answer") : Promise.resolve(null),
+        rubricFile ? ingestMaterialDocument(rubricFile, "rubric") : Promise.resolve(null),
       ]);
       const aligned = alignIngestedQuestions(qp?.questions ?? [], ma?.questions ?? []);
       if (aligned.length === 0) {
         setError("No questions could be detected in the uploaded document(s). You can still add questions manually below.");
         return;
       }
+
+      // If rubric file was ingested, attach parsed criteria where question IDs match
+      if (rb?.rubric_criteria) {
+        for (const q of aligned) {
+          const qid = q.extracted?.questionId;
+          if (qid && rb.rubric_criteria[qid]) {
+            q.criteria = rb.rubric_criteria[qid].map((c) => ({
+              name: c.code || c.description.slice(0, 30),
+              maxScore: c.max_marks,
+            }));
+          }
+        }
+      }
+
       onExtracted(aligned);
       const lowConfidence = aligned.filter((q) => (q.extracted?.mappingConfidence ?? 1) < 1).length;
       setSummary(
@@ -447,21 +463,29 @@ function MaterialsIntake({ onExtracted }: { onExtracted: (questions: DraftQuesti
 
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-      <p className="text-sm text-slate-600">
-        Upload your question paper and/or approved model answers (PDF, DOCX or TXT). Extracted questions appear below
-        for you to review and edit — nothing is saved until you click <span className="font-medium">Save assessment</span>.
-      </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-slate-600">
+          Upload your question paper, approved model answers, and/or rubric marking scheme (.pdf, .docx, .txt).
+        </p>
+        <Link
+          href="/faculty/materials"
+          className="text-xs font-medium text-indigo-600 hover:text-indigo-800 hover:underline"
+        >
+          Manage lecture notes &amp; PYQs in Academic Materials →
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <FileSlot label="Question paper (optional)" file={questionPaperFile} onChange={setQuestionPaperFile} />
-        <FileSlot label="Model answers" file={modelAnswerFile} onChange={setModelAnswerFile} />
+        <FileSlot label="Model answers (recommended)" file={modelAnswerFile} onChange={setModelAnswerFile} />
+        <FileSlot label="Rubric / Scheme (optional)" file={rubricFile} onChange={setRubricFile} />
       </div>
       <button
         onClick={extract}
-        disabled={loading || (!questionPaperFile && !modelAnswerFile)}
+        disabled={loading || (!questionPaperFile && !modelAnswerFile && !rubricFile)}
         className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
       >
         {loading ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />}
-        {loading ? "Extracting…" : "Extract questions"}
+        {loading ? "Extracting…" : "Extract questions & rubrics"}
       </button>
       {error && (
         <p className="flex items-center gap-2 text-sm text-rose-600">
@@ -471,13 +495,13 @@ function MaterialsIntake({ onExtracted }: { onExtracted: (questions: DraftQuesti
       {summary && <p className="text-sm text-emerald-700">{summary}</p>}
       <p className="text-xs text-slate-500">
         This calls the real <code className="rounded bg-slate-100 px-1 py-0.5">/materials/ingest</code> endpoint
-        (PaddleOCR-free text extraction + the same question-detection used by the handwritten pipeline). Marks are
-        only filled in when the document states them explicitly (e.g. &quot;[10 marks]&quot;) — otherwise you set
-        them below.
+        (text extraction + question segmentation). Marks are only filled in when stated explicitly
+        (e.g. &quot;[10 marks]&quot;) — never guessed.
       </p>
     </div>
   );
 }
+
 
 function FileSlot({ label, file, onChange }: { label: string; file: File | null; onChange: (f: File | null) => void }) {
   return (

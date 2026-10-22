@@ -15,7 +15,7 @@ from backend.app.services.ingestion_service import (
 )
 from backend.app.services.segmentation_service import segment_answers
 
-KINDS = {"question_paper", "model_answer", "rubric", "reference"}
+KINDS = {"question_paper", "model_answer", "rubric", "reference", "notes", "lecture_notes", "pyq"}
 _QID = re.compile(r"^(Q\d+)([a-z]?)$")
 _CRIT_MARKS = re.compile(r"[\[\(]\s*(\d+(?:\.\d+)?)\s*(?:marks?|m)?\s*[\]\)]|(\d+(?:\.\d+)?)\s*(?:marks?|m)\b|[-–:]\s*(\d+(?:\.\d+)?)\s*$", re.I)
 
@@ -127,13 +127,13 @@ def add_document(db: Session, assessment: m.Assessment, kind: str, filename: str
     db.add(doc)
     db.flush()
     items = 0
-    if kind in ("question_paper", "model_answer"):
+    if kind in ("question_paper", "model_answer", "pyq"):
         for seg in segment_answers(text).segments:
             if not seg.text.strip():
                 continue
             sq = _get_subq(db, assessment.id, seg.question_id)
             sq.approved = False
-            if kind == "question_paper":
+            if kind in ("question_paper", "pyq"):
                 sq.text = seg.text.strip()
                 sq.max_marks = _extract_marks(seg.marker_line or "") or _extract_marks(seg.text) or sq.max_marks
                 sq.question.text = sq.question.text or ""
@@ -149,6 +149,8 @@ def add_document(db: Session, assessment: m.Assessment, kind: str, filename: str
             sq = _get_subq(db, assessment.id, full_id)
             _replace_rubric(db, sq, crits, doc.id)
             items += 1
+    elif kind in ("reference", "notes", "lecture_notes"):
+        items += 1
     assessment.status = "DRAFT"  # any new material needs (re-)approval
     audit.log(db, actor, "document.uploaded", "document", doc.id, {"kind": kind, "filename": filename, "items": items})
     return {"document_id": str(doc.id), "duplicate": False, "items": items}
@@ -243,7 +245,54 @@ def approve_assessment(db: Session, assessment: m.Assessment, actor: str) -> Dic
     if approved == 0:
         raise MaterialError("Nothing can be approved yet: upload a question paper and model answers first.")
     assessment.status = "MATERIALS_APPROVED"
-    index = rag_service.index_assessment(db, assessment, rag_service.get_rag(), lambda d: extract_material_text(d.filename, storage.read(d.storage_path)))
+
+    # Sync with Knowledge Repository for scoped retrieval in evaluation
+    from backend.app.services.retrieval_service import (
+        register_approved_question_material,
+        register_approved_reference_material,
+    )
+    subj_code = assessment.subject.code if assessment.subject else "General"
+    for row in rows:
+        sq = db.get(m.SubQuestion, uuid.UUID(row["id"]))
+        if sq and sq.approved:
+            rubric_dict = (
+                {
+                    "criteria": [
+                        {"name": c.code or c.description[:30], "description": c.description, "max_score": c.max_marks}
+                        for c in (sq.rubric.criteria if sq.rubric else [])
+                    ]
+                }
+                if sq.rubric
+                else {}
+            )
+            register_approved_question_material(
+                assessment_id=str(assessment.id),
+                question_id=sq.full_id,
+                model_answer=sq.model_answer.text if sq.model_answer else "",
+                rubric=rubric_dict,
+                question_text=sq.text,
+                source_file="faculty_portal",
+                subject=subj_code,
+            )
+
+    for d in db.query(m.Document).filter_by(assessment_id=assessment.id):
+        if d.kind in ("reference", "notes", "lecture_notes", "pyq") and d.approved:
+            try:
+                raw_bytes = storage.read(d.storage_path)
+                doc_text = extract_material_text(d.filename, raw_bytes)
+                register_approved_reference_material(
+                    assessment_id=str(assessment.id),
+                    content=doc_text,
+                    source_file=d.filename,
+                    document_type=d.kind,
+                    subject=subj_code,
+                )
+            except Exception:
+                pass
+
+    index = rag_service.index_assessment(
+        db, assessment, rag_service.get_rag(), lambda d: extract_material_text(d.filename, storage.read(d.storage_path))
+    )
     for d in db.query(m.Document).filter_by(assessment_id=assessment.id):
         d.index_status = index["status"]
     audit.log(db, actor, "assessment.approved", "assessment", assessment.id, {"approved": approved, "rag": index["status"]})

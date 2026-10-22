@@ -150,6 +150,7 @@ class Submission(_Row, Base):
     # UPLOADED|PROCESSING|EXTRACTED|EVALUATING|EVALUATED|NEEDS_REVIEW|FINAL|FAILED
     ocr_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ocr_review_confirmed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class StudentResponse(_Row, Base):
