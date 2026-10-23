@@ -157,7 +157,7 @@ def _bg_process_and_evaluate(
         # OCR extraction must stop for mandatory faculty review.
         # Evaluation happens through the separate /evaluate endpoint
         # after the faculty confirms the extracted answers.
-        if do_eval and status == "EXTRACTED":
+        if do_eval and status == "NEEDS_REVIEW":
             logger.info(
                 "Submission %s is awaiting faculty OCR review; "
                 "automatic evaluation was intentionally deferred.",
@@ -189,7 +189,16 @@ def process(submission_id: str, bg: BackgroundTasks, evaluate: bool = Query(True
     bg.add_task(_bg_process_and_evaluate, sub.id, who.name, evaluate, force)
     return {"status": "ACCEPTED", "note": "poll GET /submissions/{id} for status"}
 
-
+@router.post("/submissions/{submission_id}/confirm-ocr")
+def confirm_ocr(
+    submission_id: str,
+    db: Session = Depends(get_db),
+    who=Depends(auth.faculty),
+):
+    sub = _sub(db, submission_id)
+    _wrap(subs.confirm_ocr_review, db, sub.id, who.name)
+    db.commit()
+    return {"confirmed": True, "submission_id": str(sub.id)}
 @router.post("/submissions/{submission_id}/evaluate", status_code=202)
 def evaluate(submission_id: str, bg: BackgroundTasks, force: bool = Query(False), sync: bool = Query(False),
              db: Session = Depends(get_db), who=Depends(auth.faculty)):

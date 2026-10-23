@@ -123,10 +123,10 @@ def process_submission(db: Session, submission_id, *, ocr_fn: Callable[[bytes], 
                                  ocr_confidence=ocr_c, mapping_confidence=map_c,
                                  region_ref={"regions": a["regions"]}, needs_review=bool(reasons), review_reasons=reasons))
     sub.ocr_confidence = round(sum(page_confs) / len(page_confs), 4) if page_confs else 0.0
-    sub.status = "EXTRACTED"
+    sub.status = "NEEDS_REVIEW"
     audit.log(db, actor, "submission.extracted", "submission", sub.id, {"pages": len(page_confs), "subquestions": len(subqs)})
     db.flush()
-    return {"status": "EXTRACTED", "responses": len(subqs), "ocr_confidence": sub.ocr_confidence}
+    return {"status": "NEEDS_REVIEW", "responses": len(subqs), "ocr_confidence": sub.ocr_confidence}
 
 
 

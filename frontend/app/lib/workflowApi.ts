@@ -65,8 +65,8 @@ async function call<T>(role: Role, path: string, init: RequestInit = {}): Promis
     }
     const msg =
       res.status === 401 ? "Not authorised: check your API key in the connection bar."
-      : res.status === 503 ? detail || "Service unavailable."
-      : detail || `Request failed (${res.status}).`;
+        : res.status === 503 ? detail || "Service unavailable."
+          : detail || `Request failed (${res.status}).`;
     throw new WorkflowError(res.status, msg);
   }
   return (await res.json()) as T;
@@ -138,6 +138,12 @@ export const wf = {
   },
   process: (sid: string, force = false) => call("faculty", `/submissions/${sid}/process?force=${force}`, { method: "POST" }),
   evaluate: (sid: string, force = false) => call("faculty", `/submissions/${sid}/evaluate?force=${force}`, { method: "POST" }),
+  confirmOcrReview: (sid: string) =>
+    call<{ confirmed: boolean; submission_id: string }>(
+      "faculty",
+      `/submissions/${sid}/confirm-ocr`,
+      { method: "POST" },
+    ),
   dashboard: (id: string) => call<Dashboard>("faculty", `/assessments/${id}/dashboard`),
   submission: (sid: string) => call<SubmissionView>("faculty", `/submissions/${sid}`),
   review: (rid: string, b: { action: string; final_marks?: number; comment?: string }) => call<ResponseView>("faculty", `/responses/${rid}/review`, json(b)),

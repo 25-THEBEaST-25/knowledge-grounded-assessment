@@ -54,8 +54,29 @@ def submit(c, aid, roll="R001", seed=1):
 
 
 def run(c, sid, **q):
-    r = c.post(f"/submissions/{sid}/process", params={"sync": "true", **q}, headers=F)
+    r = c.post(
+        f"/submissions/{sid}/process",
+        params={"sync": "true", **q},
+        headers=F,
+    )
     assert r.status_code == 202, r.text
+
+    submission = c.get(f"/submissions/{sid}", headers=F).json()
+
+    # Return immediately for OCR-only tests or failed extraction.
+    if (
+        q.get("evaluate", "true") == "false"
+        or submission["status"] != "NEEDS_REVIEW"
+    ):
+        return submission
+
+    # Simulate faculty confirmation before AI grading.
+    confirm = c.post(f"/submissions/{sid}/confirm-ocr", headers=F)
+    assert confirm.status_code == 200, confirm.text
+
+    evaluate = c.post(f"/submissions/{sid}/evaluate", headers=F)
+    assert evaluate.status_code in (200, 202), evaluate.text
+
     return c.get(f"/submissions/{sid}", headers=F).json()
 
 
@@ -106,7 +127,7 @@ def test_ocr_maps_answers_to_subquestions_with_regions(env):
     aid = setup_assessment(env)
     d = run(env, submit(env, aid), evaluate="false")
     by = {r["subquestion"]: r for r in d["responses"]}
-    assert d["status"] == "EXTRACTED" and set(by) == {"Q1a", "Q1b"}
+    assert d["status"] == "NEEDS_REVIEW" and set(by) == {"Q1a", "Q1b"}
     assert "SYN" in by["Q1a"]["student_text"] and "sliding window" in by["Q1b"]["student_text"]
     assert by["Q1a"]["mapping_confidence"] == 1.0 and by["Q1a"]["region_ref"]["regions"][0]["page"] == 1
     assert not by["Q1a"]["needs_review"]
